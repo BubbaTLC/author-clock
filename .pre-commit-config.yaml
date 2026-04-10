@@ -1,0 +1,64 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        types: [c, python, yaml, json, markdown]
+      - id: end-of-file-fixer
+        types: [c, python, yaml, json, markdown]
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-case-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+
+  - repo: local
+    hooks:
+      - id: clang-format
+        name: clang-format (ESP-IDF)
+        language: system
+        entry: /Users/bubbachabot/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clang-format
+        args: [-i]
+        types_or: [c, c++]
+        files: ^main/
+        exclude: ^main/epd/
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: check-env-not-staged
+        name: check-env-not-staged
+        language: script
+        entry: .hooks/check-env-not-staged.sh
+        always_run: true
+        pass_filenames: false
+
+      - id: check-sdkconfig-not-staged
+        name: check-sdkconfig-not-staged
+        language: script
+        entry: .hooks/check-sdkconfig-not-staged.sh
+        always_run: true
+        pass_filenames: false
+
+      - id: validate-partitions
+        name: validate-partitions
+        language: python
+        entry: python .hooks/validate-partitions-csv.py
+        files: partitions\.csv
+        pass_filenames: true

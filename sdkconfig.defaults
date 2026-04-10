@@ -1,0 +1,28 @@
+# Author Clock — sdkconfig defaults
+# Applied on top of target defaults when sdkconfig is absent or reset.
+
+# Partition table
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Flash
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Main task stack (large enough for HTTP + TLS handshake)
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# TLS / HTTPS — use mbedTLS certificate bundle for OWM + NTP HTTPS
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# WiFi RX buffers
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+
+# mDNS hostname visible on local network
+CONFIG_LWIP_LOCAL_HOSTNAME="authorclock"
+
+# LittleFS — on-device quote storage partition
+CONFIG_LITTLEFS_FOR_IDF_VER=y
+CONFIG_LITTLEFS_MAX_PARTITIONS=1
+CONFIG_LITTLEFS_PAGE_SIZE=256
+CONFIG_LITTLEFS_OBJ_NAME_LEN=64
