@@ -1,5 +1,4 @@
 {
-  "C_Cpp.intelliSenseEngine": "default",
   "idf.openOcdConfigs": [
     "board/esp32-wrover-kit-3.3v.cfg"
   ],
@@ -8,11 +7,6 @@
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32"
   },
-  "clangd.path": "/Users/bubbachabot/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd",
-  "clangd.arguments": [
-    "--background-index",
-    "--query-driver=**",
-    "--compile-commands-dir=/Users/bubbachabot/3d_printing_projects/hello_world/build"
-  ],
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "idf.monitorEnableTimestamps": true
 }

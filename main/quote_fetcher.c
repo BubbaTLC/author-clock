@@ -98,7 +98,7 @@ static void try_parse_object(fetch_state_t *s) {
         return;
     s->obj_buf[s->obj_len] = '\0';
 
-    char quote[1024], title[128], author[128];
+    char quote[1024], title[128], author[128], timestring[128];
     if (json_extract_string(s->obj_buf, "quote", quote, sizeof(quote)) &&
         json_extract_string(s->obj_buf, "title", title, sizeof(title)) &&
         json_extract_string(s->obj_buf, "author", author, sizeof(author)) &&
@@ -107,8 +107,17 @@ static void try_parse_object(fetch_state_t *s) {
         strlcpy(q->quote, quote, sizeof(q->quote));
         strlcpy(q->title, title, sizeof(q->title));
         strlcpy(q->author, author, sizeof(q->author));
+
+        // timeString is optional for backward compatibility
+        if (json_extract_string(s->obj_buf, "timeString", timestring, sizeof(timestring))) {
+            strlcpy(q->timestring, timestring, sizeof(q->timestring));
+        } else {
+            q->timestring[0] = '\0'; // empty string if not found
+        }
+
         s->match_count++;
-        ESP_LOGD(TAG, "Matched quote #%d: \"%s\" — %s", s->match_count, q->title, q->author);
+        ESP_LOGD(TAG, "Matched quote #%d: \"%s\" — %s (%s)", s->match_count, q->title, q->author,
+                 q->timestring);
     }
 }
 

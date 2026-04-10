@@ -6,6 +6,8 @@
 #include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_netif.h"
+#include "driver/gpio.h"
 #include "nvs_config.h"
 #include "wifi_prov.h"
 #include "wifi_sta.h"
@@ -60,7 +62,10 @@ static void provisioning_done_cb(void) {
 
 // ─── FreeRTOS tasks ───────────────────────────────────────────────────────────
 static void clock_task(void *arg) {
-    uint8_t last_min = 0xFF;
+    // Initialise last_min to whatever minute was already displayed before this
+    // task started.  This prevents an immediate duplicate update for the same
+    // minute that was just shown by the STATE_RUNNING initialisation call.
+    uint8_t last_min = (uint8_t)(uintptr_t)arg;
 
     while (1) {
         uint8_t hour = 0, min = 0, sec = 0;
@@ -211,8 +216,31 @@ void app_main(void) {
             ntp_get_current_time(&h, &m, NULL, NULL, NULL, NULL, NULL);
             display_mgr_update(h, m, date_str, NULL);
 
-            // Start clock task — drives quote refresh every minute
-            xTaskCreate(clock_task, "clock_task", CLOCK_TASK_STACK_SIZE, NULL, 5, NULL);
+            // Start persistent configuration server on STA interface
+            ESP_LOGI(TAG, "Starting configuration web server");
+            esp_err_t config_ret = wifi_simple_config_start();
+            if (config_ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to start config server: %s", esp_err_to_name(config_ret));
+                ESP_LOGW(TAG, "Continuing without config server");
+            } else {
+                // Get the STA IP address for user reference
+                esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+                esp_netif_ip_info_t ip_info;
+                if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+                    char ip_str[16];
+                    esp_ip4addr_ntoa(&ip_info.ip, ip_str, sizeof(ip_str));
+                    ESP_LOGI(TAG, "Configuration server running at http://%s", ip_str);
+                    ESP_LOGI(TAG, "Access from any device on your WiFi network");
+                } else {
+                    ESP_LOGI(TAG, "Configuration server started (check device IP for access)");
+                }
+            }
+
+            // Start clock task — drives quote refresh every minute.
+            // Pass 'm' so the task skips the minute we just displayed and
+            // waits for the next real minute change.
+            xTaskCreate(clock_task, "clock_task", CLOCK_TASK_STACK_SIZE, (void *)(uintptr_t)m, 5,
+                        NULL);
 
             // Block forever; clock_task drives everything
             while (1) {

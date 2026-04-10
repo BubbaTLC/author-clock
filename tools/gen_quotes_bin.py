@@ -53,6 +53,7 @@ RECORDS_START = HEADER_SIZE + INDEX_SIZE  # 7 + 7200 = 7207
 MAX_QUOTE_LEN = 0xFFFF
 MAX_TITLE_LEN = 0xFF
 MAX_AUTHOR_LEN = 0xFF
+MAX_TIMESTRING_LEN = 0xFF
 
 
 def parse_time(t: str) -> tuple[int, int]:
@@ -61,11 +62,12 @@ def parse_time(t: str) -> tuple[int, int]:
     return int(parts[0]), int(parts[1])
 
 
-def encode_record(quote: str, title: str, author: str) -> bytes:
+def encode_record(quote: str, title: str, author: str, timestring: str) -> bytes:
     """Encode a single variable-length record."""
     q = quote.encode("utf-8")
     t = title.encode("utf-8")
     a = author.encode("utf-8")
+    ts = timestring.encode("utf-8")
 
     if len(q) > MAX_QUOTE_LEN:
         print(
@@ -80,9 +82,14 @@ def encode_record(quote: str, title: str, author: str) -> bytes:
             f"  WARNING: author truncated ({len(a)} → {MAX_AUTHOR_LEN} bytes): {author}"
         )
         a = a[:MAX_AUTHOR_LEN]
+    if len(ts) > MAX_TIMESTRING_LEN:
+        print(
+            f"  WARNING: timestring truncated ({len(ts)} → {MAX_TIMESTRING_LEN} bytes): {timestring}"
+        )
+        ts = ts[:MAX_TIMESTRING_LEN]
 
-    header = struct.pack("<HBB", len(q), len(t), len(a))
-    return header + q + t + a
+    header = struct.pack("<HBBB", len(q), len(t), len(a), len(ts))
+    return header + q + t + a + ts
 
 
 def generate(input_path: str, output_path: str) -> None:
@@ -93,7 +100,7 @@ def generate(input_path: str, output_path: str) -> None:
     print(f"  {len(data)} total entries")
 
     # Group records by minute index (0..1439)
-    by_minute: dict[int, list[tuple[str, str, str]]] = defaultdict(list)
+    by_minute: dict[int, list[tuple[str, str, str, str]]] = defaultdict(list)
     skipped = 0
     for entry in data:
         try:
@@ -112,6 +119,7 @@ def generate(input_path: str, output_path: str) -> None:
                 entry.get("quote", ""),
                 entry.get("title", ""),
                 entry.get("author", ""),
+                entry.get("timeString", ""),
             )
         )
 
@@ -125,7 +133,7 @@ def generate(input_path: str, output_path: str) -> None:
     # Build encoded record bytes grouped by minute
     encoded: dict[int, list[bytes]] = {}
     for idx, records in by_minute.items():
-        encoded[idx] = [encode_record(q, t, a) for (q, t, a) in records]
+        encoded[idx] = [encode_record(q, t, a, ts) for (q, t, a, ts) in records]
 
     # Build time index: compute each slot's offset into the file
     offset = RECORDS_START  # first record starts right after header + index

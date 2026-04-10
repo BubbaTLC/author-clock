@@ -33,9 +33,13 @@ static void GPIO_Config(void)
     io_conf.pull_up_en = 1;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    // Set initial states
-    gpio_set_level(EPD_CS_PIN, 1);
-    gpio_set_level(EPD_SCK_PIN, 0);
+    // Set initial states for clean startup
+    gpio_set_level(EPD_CS_PIN, 1);    // CS high (inactive)
+    gpio_set_level(EPD_SCK_PIN, 0);   // Clock low
+    gpio_set_level(EPD_RST_PIN, 1);   // Reset not asserted 
+    gpio_set_level(EPD_DC_PIN, 0);    // Command mode initially
+    
+    ESP_LOGI(TAG, "Initial BUSY pin state: %d", gpio_get_level(EPD_BUSY_PIN));
 }
 
 static void SPI_Config(void)

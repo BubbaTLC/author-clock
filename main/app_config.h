@@ -13,7 +13,7 @@
 
 // WiFi AP settings for provisioning
 #define WIFI_AP_SSID "AuthorClock"
-#define WIFI_AP_IP "192.168.4.69"
+#define WIFI_AP_IP "192.168.4.1"
 
 // Update intervals
 #define WEATHER_UPDATE_INTERVAL_S 1800 // 30 minutes

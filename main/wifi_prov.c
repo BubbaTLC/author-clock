@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
+#include "mdns.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -23,38 +24,75 @@ static esp_netif_t *ap_netif = NULL;
 static int dns_socket = -1;
 static TaskHandle_t dns_task_handle = NULL;
 
-// HTML form for provisioning
-static const char *provisioning_html =
+// Enhanced HTML interface with separate forms and WiFi status
+static const char *enhanced_config_html_template =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta charset='UTF-8'>"
     "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
-    "<title>Author Clock Setup</title>"
+    "<title>Author Clock Configuration</title>"
     "<style>"
-    "body{font-family:Arial,sans-serif;max-width:400px;margin:50px "
+    "body{font-family:Arial,sans-serif;max-width:500px;margin:20px "
     "auto;padding:20px;background:#f5f5f5}"
     ".container{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px "
-    "rgba(0,0,0,0.1)}"
+    "rgba(0,0,0,0.1);margin-bottom:20px}"
     "h1{color:#333;text-align:center;margin-bottom:30px}"
-    ".form-group{margin-bottom:20px}"
+    "h2{color:#666;border-bottom:2px solid #4CAF50;padding-bottom:10px}"
+    ".status{background:#e8f4f8;padding:15px;border-radius:4px;margin-bottom:20px;font-size:14px}"
+    ".form-group{margin-bottom:15px}"
     "label{display:block;margin-bottom:5px;color:#555;font-weight:bold}"
-    "input,select{width:100%;padding:10px;border:1px solid "
+    "input,select{width:100%%;padding:10px;border:1px solid "
     "#ddd;border-radius:4px;font-size:16px;box-sizing:border-box}"
     "input:focus,select:focus{outline:none;border-color:#4CAF50}"
-    "button{width:100%;padding:12px;background:#4CAF50;color:white;border:none;border-radius:4px;"
-    "font-size:16px;cursor:pointer}"
-    "button:hover{background:#45a049}"
-    ".info{background:#e8f4f8;padding:15px;border-radius:4px;margin-bottom:20px;font-size:14px;"
-    "color:#666}"
+    ".btn{width:100%%;padding:12px;border:none;border-radius:4px;font-size:16px;cursor:pointer;"
+    "margin-bottom:10px}"
+    ".btn-primary{background:#4CAF50;color:white}.btn-primary:hover{background:#45a049}"
+    ".btn-danger{background:#f44336;color:white}.btn-danger:hover{background:#da190b}"
+    ".current-value{font-size:12px;color:#666;margin-bottom:5px}"
     "</style>"
     "</head><body>"
     "<div class='container'>"
-    "<h1>📚 Author Clock Setup</h1>"
-    "<div class='info'>"
-    "Configure your WiFi network and location settings. The device will restart after successful "
-    "configuration."
+    "<h1>📚 Author Clock Configuration</h1>"
+    "<div class='status'>"
+    "<strong>Current Status:</strong><br>"
+    "WiFi: Connected to %s (Signal: %d dBm)<br>"
+    "Location: %s<br>"
+    "Timezone: UTC%+d<br>"
+    "Time Format: %s<br>"
+    "Access URL: <a href='http://authorclock.local'>authorclock.local</a>"
     "</div>"
-    "<form method='POST' action='/configure'>"
+    "</div>"
+
+    "<div class='container'>"
+    "<h2>📍 Location & Time Settings</h2>"
+    "<form method='POST' action='/location'>"
+    "<div class='form-group'>"
+    "<div class='current-value'>Current: %s</div>"
+    "<label for='city'>City for Weather:</label>"
+    "<input type='text' id='city' name='city' maxlength='63' placeholder='London, New York, "
+    "Tokyo...' value='%s'>"
+    "</div>"
+    "<div class='form-group'>"
+    "<div class='current-value'>Current: UTC%+d</div>"
+    "<label for='timezone'>Timezone Offset (hours from UTC):</label>"
+    "<select id='timezone' name='timezone'>"
+    "%s" // Timezone options will be inserted here
+    "</select>"
+    "</div>"
+    "<div class='form-group'>"
+    "<div class='current-value'>Current: %s</div>"
+    "<label for='timeformat'>Time Format:</label>"
+    "<select id='timeformat' name='timeformat'>"
+    "%s" // Time format options will be inserted here
+    "</select>"
+    "</div>"
+    "<button type='submit' class='btn btn-primary'>Update Location & Time</button>"
+    "</form>"
+    "</div>"
+
+    "<div class='container'>"
+    "<h2>📶 WiFi Settings</h2>"
+    "<form method='POST' action='/wifi'>"
     "<div class='form-group'>"
     "<label for='ssid'>WiFi Network Name (SSID):</label>"
     "<input type='text' id='ssid' name='ssid' required maxlength='32' placeholder='Your WiFi "
@@ -65,47 +103,45 @@ static const char *provisioning_html =
     "<input type='password' id='password' name='password' required maxlength='64' "
     "placeholder='Your WiFi password'>"
     "</div>"
-    "<div class='form-group'>"
-    "<label for='city'>City for Weather:</label>"
-    "<input type='text' id='city' name='city' required maxlength='63' placeholder='London, New "
-    "York, Tokyo...'>"
-    "</div>"
-    "<div class='form-group'>"
-    "<label for='timezone'>Timezone Offset (hours from UTC):</label>"
-    "<select id='timezone' name='timezone' required>"
-    "<option value='-12'>UTC-12</option>"
-    "<option value='-11'>UTC-11</option>"
-    "<option value='-10'>UTC-10</option>"
-    "<option value='-9'>UTC-9</option>"
-    "<option value='-8'>UTC-8</option>"
-    "<option value='-7'>UTC-7</option>"
-    "<option value='-6'>UTC-6</option>"
-    "<option value='-5'>UTC-5</option>"
-    "<option value='-4'>UTC-4</option>"
-    "<option value='-3'>UTC-3</option>"
-    "<option value='-2'>UTC-2</option>"
-    "<option value='-1'>UTC-1</option>"
-    "<option value='0' selected>UTC+0 (London)</option>"
-    "<option value='1'>UTC+1</option>"
-    "<option value='2'>UTC+2</option>"
-    "<option value='3'>UTC+3</option>"
-    "<option value='4'>UTC+4</option>"
-    "<option value='5'>UTC+5</option>"
-    "<option value='6'>UTC+6</option>"
-    "<option value='7'>UTC+7</option>"
-    "<option value='8'>UTC+8</option>"
-    "<option value='9'>UTC+9</option>"
-    "<option value='10'>UTC+10</option>"
-    "<option value='11'>UTC+11</option>"
-    "<option value='12'>UTC+12</option>"
-    "<option value='13'>UTC+13</option>"
-    "<option value='14'>UTC+14</option>"
-    "</select>"
-    "</div>"
-    "<button type='submit'>Configure Author Clock</button>"
+    "<button type='submit' class='btn btn-primary'>Update WiFi Settings</button>"
     "</form>"
     "</div>"
+
+    "<div class='container'>"
+    "<h2>🔧 Advanced Options</h2>"
+    "<form method='POST' action='/factory-reset' onsubmit='return confirm(\"Are you sure? This "
+    "will erase all settings and restart the device.\")'>"
+    "<button type='submit' class='btn btn-danger'>Factory Reset</button>"
+    "</form>"
+    "<p style='font-size:12px;color:#666;text-align:center;margin-top:20px;'>This will erase all "
+    "WiFi credentials and location settings.</p>"
+    "</div>"
     "</body></html>";
+
+// Generate timezone options HTML with current selection
+static const char *generate_timezone_options(int8_t current_tz) {
+    static char options[2048];
+    options[0] = '\0';
+
+    for (int tz = -12; tz <= 14; tz++) {
+        char option[128];
+        snprintf(option, sizeof(option), "<option value='%d'%s>UTC%+d</option>", tz,
+                 (tz == current_tz) ? " selected" : "", tz);
+        strcat(options, option);
+    }
+
+    return options;
+}
+
+// Generate time format options HTML with current selection
+static const char *generate_timeformat_options(bool current_24h) {
+    static char options[256];
+    snprintf(options, sizeof(options),
+             "<option value='1'%s>24-hour (15:30)</option>"
+             "<option value='0'%s>12-hour (3:30 PM)</option>",
+             current_24h ? " selected" : "", current_24h ? "" : " selected");
+    return options;
+}
 
 static const char *success_html =
     "<!DOCTYPE html>"
@@ -199,6 +235,82 @@ static bool parse_form_data(const char *data, char *ssid, char *password, char *
 
     free(data_copy);
     return ssid_found && pass_found && city_found && tz_found;
+}
+
+// Parse location form data (city and timezone only)
+static bool parse_location_form_data(const char *data, char *city, int8_t *timezone,
+                                     bool *use_24_hour) {
+    if (!data || !city || !timezone || !use_24_hour)
+        return false;
+
+    char *data_copy = strdup(data);
+    if (!data_copy)
+        return false;
+
+    bool city_found = false, tz_found = false, tf_found = false;
+
+    char *token = strtok(data_copy, "&");
+    while (token != NULL) {
+        char *equals = strchr(token, '=');
+        if (equals) {
+            *equals = '\0';
+            char *key = token;
+            char *value = equals + 1;
+
+            if (strcmp(key, "city") == 0) {
+                url_decode(city, value, MAX_CITY_LEN + 1);
+                city_found = true;
+            } else if (strcmp(key, "timezone") == 0) {
+                int tz_int = atoi(value);
+                if (tz_int >= -12 && tz_int <= 14) {
+                    *timezone = (int8_t)tz_int;
+                    tz_found = true;
+                }
+            } else if (strcmp(key, "timeformat") == 0) {
+                int tf_int = atoi(value);
+                *use_24_hour = (tf_int != 0);
+                tf_found = true;
+            }
+        }
+        token = strtok(NULL, "&");
+    }
+
+    free(data_copy);
+    return city_found && tz_found && tf_found;
+}
+
+// Parse WiFi form data (SSID and password only)
+static bool parse_wifi_form_data(const char *data, char *ssid, char *password) {
+    if (!data || !ssid || !password)
+        return false;
+
+    char *data_copy = strdup(data);
+    if (!data_copy)
+        return false;
+
+    bool ssid_found = false, pass_found = false;
+
+    char *token = strtok(data_copy, "&");
+    while (token != NULL) {
+        char *equals = strchr(token, '=');
+        if (equals) {
+            *equals = '\0';
+            char *key = token;
+            char *value = equals + 1;
+
+            if (strcmp(key, "ssid") == 0) {
+                url_decode(ssid, value, MAX_SSID_LEN + 1);
+                ssid_found = true;
+            } else if (strcmp(key, "password") == 0) {
+                url_decode(password, value, MAX_PASS_LEN + 1);
+                pass_found = true;
+            }
+        }
+        token = strtok(NULL, "&");
+    }
+
+    free(data_copy);
+    return ssid_found && pass_found;
 }
 
 // Captive portal detection handler - redirects to our setup page
@@ -308,10 +420,210 @@ cleanup:
     vTaskDelete(NULL);
 }
 
-// HTTP handler for GET /
-static esp_err_t provisioning_get_handler(httpd_req_t *req) {
+// HTTP handler for GET / - Enhanced configuration interface
+static esp_err_t enhanced_config_get_handler(httpd_req_t *req) {
+    // Get current WiFi information
+    char current_ssid[33] = "Not connected";
+    char current_city[64] = "Not set";
+    int8_t current_tz = 0;
+    bool current_24h = true;
+    int rssi = 0;
+
+    // Load current settings from NVS
+    nvs_config_load_location(current_city, &current_tz);
+    nvs_config_load_time_format(&current_24h); // Ignore errors, use default
+
+    // Get WiFi status
+    wifi_ap_record_t ap_info;
+    esp_err_t ret = esp_wifi_sta_get_ap_info(&ap_info);
+    if (ret == ESP_OK) {
+        snprintf(current_ssid, sizeof(current_ssid), "%s", (char *)ap_info.ssid);
+        rssi = ap_info.rssi;
+    }
+
+    // Generate timezone and time format options with current selections
+    const char *timezone_options = generate_timezone_options(current_tz);
+    const char *timeformat_options = generate_timeformat_options(current_24h);
+
+    // Create the complete HTML response
+    char *html_response = malloc(8192);
+    if (!html_response) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
+        return ESP_FAIL;
+    }
+
+    snprintf(html_response, 8192, enhanced_config_html_template, current_ssid, rssi, current_city,
+             current_tz,                             // Status section
+             current_24h ? "24-hour" : "12-hour",    // Time format status
+             current_city, current_city, current_tz, // Location form
+             timezone_options,                       // Timezone options
+             current_24h ? "24-hour" : "12-hour",    // Time format current value
+             timeformat_options                      // Time format options
+    );
+
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, provisioning_html, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, html_response, HTTPD_RESP_USE_STRLEN);
+
+    free(html_response);
+    return ESP_OK;
+}
+
+// HTTP handler for POST /location - Update location and timezone only
+static esp_err_t location_post_handler(httpd_req_t *req) {
+    char content[256];
+    size_t recv_size =
+        (req->content_len < sizeof(content) - 1) ? req->content_len : sizeof(content) - 1;
+    int ret = httpd_req_recv(req, content, recv_size);
+
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request");
+        return ESP_FAIL;
+    }
+
+    content[ret] = '\0';
+    ESP_LOGI(TAG, "Received location data: %s", content);
+
+    char city[MAX_CITY_LEN + 1] = {0};
+    int8_t timezone = 0;
+    bool use_24_hour = true;
+
+    // Parse city, timezone, and time format from form data
+    if (!parse_location_form_data(content, city, &timezone, &use_24_hour)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form data");
+        return ESP_FAIL;
+    }
+
+    // Validate inputs
+    if (strlen(city) == 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "City cannot be empty");
+        return ESP_FAIL;
+    }
+
+    // Save location to NVS
+    esp_err_t err = nvs_config_save_location(city, timezone);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save location config: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save location");
+        return ESP_FAIL;
+    }
+
+    // Save time format to NVS
+    err = nvs_config_save_time_format(use_24_hour);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save time format config: %s", esp_err_to_name(err));
+        // Don't fail the request for time format errors, just log
+    }
+
+    ESP_LOGI(TAG, "Location updated - City: '%s', TZ: UTC%+d, Format: %s", city, timezone,
+             use_24_hour ? "24-hour" : "12-hour");
+
+    // Send success response and redirect
+    const char *success_response = "<!DOCTYPE html><html><head>"
+                                   "<meta http-equiv='refresh' content='2;url=/'>"
+                                   "<title>Settings Updated</title></head><body>"
+                                   "<h2>✅ Location & Time Settings Updated!</h2>"
+                                   "<p>City: %s</p><p>Timezone: UTC%+d</p><p>Time Format: %s</p>"
+                                   "<p>Redirecting back to configuration...</p></body></html>";
+
+    char response[512];
+    snprintf(response, sizeof(response), success_response, city, timezone,
+             use_24_hour ? "24-hour" : "12-hour");
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+
+    return ESP_OK;
+}
+
+// HTTP handler for POST /wifi - Update WiFi settings and restart
+static esp_err_t wifi_post_handler(httpd_req_t *req) {
+    char content[256];
+    size_t recv_size =
+        (req->content_len < sizeof(content) - 1) ? req->content_len : sizeof(content) - 1;
+    int ret = httpd_req_recv(req, content, recv_size);
+
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request");
+        return ESP_FAIL;
+    }
+
+    content[ret] = '\0';
+    ESP_LOGI(TAG, "Received WiFi data: %s", content);
+
+    char ssid[MAX_SSID_LEN + 1] = {0};
+    char password[MAX_PASS_LEN + 1] = {0};
+
+    // Parse only SSID and password from form data
+    if (!parse_wifi_form_data(content, ssid, password)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form data");
+        return ESP_FAIL;
+    }
+
+    // Validate inputs
+    if (strlen(ssid) == 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SSID cannot be empty");
+        return ESP_FAIL;
+    }
+
+    // Save WiFi settings to NVS
+    esp_err_t err = nvs_config_save_wifi(ssid, password);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save WiFi config: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save WiFi settings");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "WiFi settings updated - SSID: '%s'", ssid);
+
+    // Send success response with restart instruction
+    const char *wifi_success_response =
+        "<!DOCTYPE html><html><head><title>WiFi Updated</title></head><body>"
+        "<h2>✅ WiFi Settings Updated!</h2>"
+        "<p>New SSID: %s</p>"
+        "<p><strong>Please restart your device to apply WiFi changes.</strong></p>"
+        "<p>Press the reset button on your ESP32 or power cycle it.</p>"
+        "<button onclick='location.href=\"/\"'>Back to Configuration</button>"
+        "</body></html>";
+
+    char response[512];
+    snprintf(response, sizeof(response), wifi_success_response, ssid);
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+
+    return ESP_OK;
+}
+
+// HTTP handler for POST /factory-reset - Clear all settings
+static esp_err_t factory_reset_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Factory reset requested");
+
+    // Clear all NVS settings
+    esp_err_t err = nvs_config_clear_all();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to clear NVS: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Factory reset failed");
+        return ESP_FAIL;
+    }
+
+    // Send response and schedule restart
+    const char *reset_response =
+        "<!DOCTYPE html><html><head><title>Factory Reset</title></head><body>"
+        "<h2>🔄 Factory Reset Complete</h2>"
+        "<p>All settings have been cleared. The device will restart in 3 seconds.</p>"
+        "<p>After restart, look for the \"AuthorClock\" WiFi network to configure the device.</p>"
+        "<script>setTimeout(function(){document.body.innerHTML='<h2>Restarting device...</h2>';}, "
+        "3000);</script>"
+        "</body></html>";
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, reset_response, HTTPD_RESP_USE_STRLEN);
+
+    // Schedule restart after sending response
+    ESP_LOGI(TAG, "Scheduling device restart in 3 seconds");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    esp_restart();
+
     return ESP_OK;
 }
 
@@ -368,16 +680,64 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // Send success page
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, success_html, HTTPD_RESP_USE_STRLEN);
+    // Check if this is persistent config mode (callback is NULL) or initial provisioning
+    bool is_persistent_mode = (complete_callback == NULL);
 
-    ESP_LOGI(TAG, "Configuration saved successfully, triggering completion callback");
+    if (is_persistent_mode) {
+        // In persistent mode, send update confirmation and instructions
+        const char *update_html =
+            "<!DOCTYPE html>"
+            "<html><head>"
+            "<meta charset='UTF-8'>"
+            "<title>Configuration Updated</title>"
+            "<style>body{font-family:Arial,sans-serif;margin:40px;background:#f5f5f5;}"
+            ".container{background:white;padding:30px;border-radius:8px;max-width:500px;margin:0 "
+            "auto;}"
+            ".success{color:#28a745;} .warning{color:#ffc107;} .info{color:#17a2b8;}"
+            "button{background:#007bff;color:white;padding:10px "
+            "20px;border:none;border-radius:4px;cursor:pointer;margin:5px;}"
+            "button:hover{background:#0056b3;}</style>"
+            "</head><body>"
+            "<div class='container'>"
+            "<h2 class='success'>✓ Configuration Updated Successfully</h2>"
+            "<p><strong>SSID:</strong> %s</p>"
+            "<p><strong>Location:</strong> %s</p>"
+            "<p><strong>Timezone:</strong> UTC%+d</p>"
+            "<div class='info'>"
+            "<p><strong>What happens next:</strong></p>"
+            "<ul>"
+            "<li>Settings have been saved to device memory</li>"
+            "<li>WiFi connection will be updated on next restart</li>"
+            "<li>Timezone will take effect immediately</li>"
+            "</ul>"
+            "</div>"
+            "<div class='warning'>"
+            "<p><strong>To apply WiFi changes:</strong></p>"
+            "<p>Press the reset button on your ESP32 device, or power cycle it.</p>"
+            "</div>"
+            "<p><button onclick='location.reload()'>Make More Changes</button></p>"
+            "</div>"
+            "</body></html>";
 
-    // Trigger completion callback after a brief delay
-    if (complete_callback) {
-        // Use a timer or task to call the callback after the HTTP response is sent
-        complete_callback();
+        char response[1500];
+        snprintf(response, sizeof(response), update_html, ssid, city, timezone);
+
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+
+        ESP_LOGI(TAG, "Configuration updated in persistent mode - no restart triggered");
+    } else {
+        // In initial provisioning mode, use original success page and restart
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_send(req, success_html, HTTPD_RESP_USE_STRLEN);
+
+        ESP_LOGI(TAG, "Configuration saved successfully, triggering completion callback");
+
+        // Trigger completion callback after a brief delay
+        if (complete_callback) {
+            // Use a timer or task to call the callback after the HTTP response is sent
+            complete_callback();
+        }
     }
 
     return ESP_OK;
@@ -428,20 +788,45 @@ static esp_err_t wifi_init_ap(void) {
 }
 
 // Start HTTP server
-static esp_err_t start_webserver(void) {
+esp_err_t start_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
 
     ESP_LOGI(TAG, "Starting HTTP server on port: %d", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
-        // Set URI handlers
-        httpd_uri_t provisioning_uri = {
+        // Set URI handlers for enhanced configuration interface
+        httpd_uri_t main_uri = {
             .uri = "/",
             .method = HTTP_GET,
-            .handler = provisioning_get_handler,
+            .handler = enhanced_config_get_handler,
         };
-        httpd_register_uri_handler(server, &provisioning_uri);
+        httpd_register_uri_handler(server, &main_uri);
 
+        // Location form handler
+        httpd_uri_t location_uri = {
+            .uri = "/location",
+            .method = HTTP_POST,
+            .handler = location_post_handler,
+        };
+        httpd_register_uri_handler(server, &location_uri);
+
+        // WiFi form handler
+        httpd_uri_t wifi_uri = {
+            .uri = "/wifi",
+            .method = HTTP_POST,
+            .handler = wifi_post_handler,
+        };
+        httpd_register_uri_handler(server, &wifi_uri);
+
+        // Factory reset handler
+        httpd_uri_t factory_reset_uri = {
+            .uri = "/factory-reset",
+            .method = HTTP_POST,
+            .handler = factory_reset_handler,
+        };
+        httpd_register_uri_handler(server, &factory_reset_uri);
+
+        // Keep legacy configure endpoint for backward compatibility
         httpd_uri_t configure_uri = {
             .uri = "/configure",
             .method = HTTP_POST,
@@ -562,4 +947,73 @@ esp_err_t wifi_prov_stop(void) {
 
 bool wifi_prov_is_active(void) {
     return provisioning_active;
+}
+
+// Initialize mDNS service for device discovery
+static esp_err_t init_mdns_service(void) {
+    esp_err_t ret = mdns_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize mDNS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Set hostname
+    ret = mdns_hostname_set("authorclock");
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set mDNS hostname: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Set instance name
+    ret = mdns_instance_name_set("Author Clock Configuration");
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set mDNS instance name: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Add HTTP service
+    ret = mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add mDNS HTTP service: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Add service text record
+    mdns_txt_item_t service_txt_data[] = {{"device", "Author Clock"}, {"version", "1.0"}};
+    ret = mdns_service_txt_set("_http", "_tcp", service_txt_data, 2);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set mDNS service TXT: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "mDNS service initialized - device available at authorclock.local");
+    return ESP_OK;
+}
+
+esp_err_t wifi_simple_config_start(void) {
+    ESP_LOGI(TAG, "Starting simple configuration server");
+
+    // Start web server on current interface (no APSTA complexity)
+    esp_err_t ret = start_webserver();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start config web server: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Initialize mDNS service for device discovery
+    ret = init_mdns_service();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS initialization failed, continuing without mDNS discovery");
+        // Don't fail completely - device is still accessible by IP
+    }
+
+    // Set persistent mode (no callback = no restart after config change)
+    complete_callback = NULL;
+    provisioning_active = true;
+
+    ESP_LOGI(TAG, "Configuration server started on port 80");
+    ESP_LOGI(TAG, "Access via device's IP address on your WiFi network");
+    ESP_LOGI(TAG, "Or visit http://authorclock.local for easy discovery");
+
+    return ESP_OK;
 }

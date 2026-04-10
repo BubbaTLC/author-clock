@@ -12,6 +12,7 @@ static const char *KEY_SSID = "ssid";
 static const char *KEY_PASS = "pass";
 static const char *KEY_CITY = "city";
 static const char *KEY_TZ_OFF = "tz_off";
+static const char *KEY_TIME_FMT = "time_fmt";
 
 static nvs_handle_t nvs_handle_config = 0;
 static bool nvs_initialized = false;
@@ -272,5 +273,64 @@ esp_err_t nvs_config_clear_all(void) {
     }
 
     ESP_LOGI(TAG, "All configuration data cleared");
+    return ESP_OK;
+}
+
+esp_err_t nvs_config_save_time_format(bool use_24_hour) {
+    esp_err_t ret;
+
+    if (!nvs_initialized) {
+        ESP_LOGE(TAG, "NVS not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Saving time format: %s", use_24_hour ? "24-hour" : "12-hour");
+
+    // Save time format (1 = 24-hour, 0 = 12-hour)
+    ret = nvs_set_u8(nvs_handle_config, KEY_TIME_FMT, use_24_hour ? 1 : 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save time format: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Commit changes
+    ret = nvs_commit(nvs_handle_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit time format: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Time format saved successfully");
+    return ESP_OK;
+}
+
+esp_err_t nvs_config_load_time_format(bool *use_24_hour) {
+    esp_err_t ret;
+    uint8_t format_val;
+
+    if (!nvs_initialized) {
+        ESP_LOGE(TAG, "NVS not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!use_24_hour) {
+        ESP_LOGE(TAG, "Invalid parameter: use_24_hour is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Load time format
+    ret = nvs_get_u8(nvs_handle_config, KEY_TIME_FMT, &format_val);
+    if (ret != ESP_OK) {
+        if (ret == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGD(TAG, "No time format stored, defaulting to 24-hour");
+            *use_24_hour = true; // Default to 24-hour format
+        } else {
+            ESP_LOGE(TAG, "Failed to load time format: %s", esp_err_to_name(ret));
+        }
+        return ret;
+    }
+
+    *use_24_hour = (format_val != 0);
+    ESP_LOGI(TAG, "Time format loaded: %s", *use_24_hour ? "24-hour" : "12-hour");
     return ESP_OK;
 }

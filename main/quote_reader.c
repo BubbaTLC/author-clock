@@ -10,6 +10,10 @@
 static const char *TAG = "QUOTE_RDR";
 
 // ─── Binary format constants (must match gen_quotes_bin.py) ──────────────────
+//
+// Each record: [0..1] quote_len(uint16) + [2] title_len(uint8) + [3] author_len(uint8) +
+//              [4] timestring_len(uint8) + [5..] quote + title + author + timestring
+//
 
 #define BQDB_MAGIC "BQDB"
 #define BQDB_VERSION 0x01
@@ -158,13 +162,13 @@ esp_err_t quote_read(uint8_t hour, uint8_t minute, quote_result_t *out) {
     // Skip 'pick' records then read the chosen one
     for (uint32_t i = 0; i < pick; i++) {
         uint16_t qlen;
-        uint8_t tlen, alen;
+        uint8_t tlen, alen, tslen;
         if (!fread_exact(&qlen, 2, s_file) || !fread_exact(&tlen, 1, s_file) ||
-            !fread_exact(&alen, 1, s_file)) {
+            !fread_exact(&alen, 1, s_file) || !fread_exact(&tslen, 1, s_file)) {
             ESP_LOGE(TAG, "Failed reading record header (skip %lu)", (unsigned long)i);
             return ESP_FAIL;
         }
-        if (!fskip(s_file, (long)qlen + tlen + alen)) {
+        if (!fskip(s_file, (long)qlen + tlen + alen + tslen)) {
             ESP_LOGE(TAG, "Failed skipping record body");
             return ESP_FAIL;
         }
@@ -172,9 +176,9 @@ esp_err_t quote_read(uint8_t hour, uint8_t minute, quote_result_t *out) {
 
     // Read the chosen record
     uint16_t qlen;
-    uint8_t tlen, alen;
+    uint8_t tlen, alen, tslen;
     if (!fread_exact(&qlen, 2, s_file) || !fread_exact(&tlen, 1, s_file) ||
-        !fread_exact(&alen, 1, s_file)) {
+        !fread_exact(&alen, 1, s_file) || !fread_exact(&tslen, 1, s_file)) {
         ESP_LOGE(TAG, "Failed reading chosen record header");
         return ESP_FAIL;
     }
@@ -183,6 +187,7 @@ esp_err_t quote_read(uint8_t hour, uint8_t minute, quote_result_t *out) {
     size_t qcopy = qlen < sizeof(out->quote) - 1 ? qlen : sizeof(out->quote) - 1;
     size_t tcopy = tlen < sizeof(out->title) - 1 ? tlen : sizeof(out->title) - 1;
     size_t acopy = alen < sizeof(out->author) - 1 ? alen : sizeof(out->author) - 1;
+    size_t tscopy = tslen < sizeof(out->timestring) - 1 ? tslen : sizeof(out->timestring) - 1;
 
     if (fread(out->quote, 1, qcopy, s_file) != qcopy)
         return ESP_FAIL;
@@ -199,9 +204,15 @@ esp_err_t quote_read(uint8_t hour, uint8_t minute, quote_result_t *out) {
     if (fread(out->author, 1, acopy, s_file) != acopy)
         return ESP_FAIL;
     out->author[acopy] = '\0';
+    if (acopy < alen)
+        fskip(s_file, (long)(alen - acopy));
 
-    ESP_LOGD(TAG, "quote_read(%02u:%02u) pick=%lu/%u: \"%s\" — %s", hour, minute,
-             (unsigned long)pick, count, out->title, out->author);
+    if (fread(out->timestring, 1, tscopy, s_file) != tscopy)
+        return ESP_FAIL;
+    out->timestring[tscopy] = '\0';
+
+    ESP_LOGD(TAG, "quote_read(%02u:%02u) pick=%lu/%u: \"%s\" — %s (%s)", hour, minute,
+             (unsigned long)pick, count, out->title, out->author, out->timestring);
     return ESP_OK;
 }
 

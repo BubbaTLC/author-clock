@@ -20,12 +20,16 @@ parameter:
 ******************************************************************************/
 static void EPD_Reset(void)
 {
+    // Extended reset sequence for 7.5" V2 - needs longer timing for reliable wake-up
     DEV_Digital_Write(EPD_RST_PIN, 1);
-    DEV_Delay_ms(20);
+    DEV_Delay_ms(100);    // Hold high longer initially
     DEV_Digital_Write(EPD_RST_PIN, 0);
-    DEV_Delay_ms(2);
+    DEV_Delay_ms(10);     // Hold reset longer 
     DEV_Digital_Write(EPD_RST_PIN, 1);
-    DEV_Delay_ms(20);
+    DEV_Delay_ms(200);    // Wait longer after reset release
+    
+    // Verify BUSY pin is in expected state after reset
+    ESP_LOGI(TAG, "Reset complete - BUSY pin level: %d", DEV_Digital_Read(EPD_BUSY_PIN));
 }
 
 /******************************************************************************
@@ -68,17 +72,28 @@ parameter:
 ******************************************************************************/
 static void EPD_WaitUntilIdle(void)
 {
-    ESP_LOGI(TAG, "e-Paper busy");
+    ESP_LOGI(TAG, "e-Paper busy - BUSY pin level: %d", DEV_Digital_Read(EPD_BUSY_PIN));
     uint32_t elapsed = 0;
+    uint32_t log_interval = 5000; // Log every 5 seconds
+    uint32_t last_log = 0;
+    
     while (DEV_Digital_Read(EPD_BUSY_PIN) == 0) {
-        DEV_Delay_ms(20);   // 2 ticks — yields to IDLE so TWDT doesn't fire
-        elapsed += 20;
+        DEV_Delay_ms(50);   // Check more frequently but still yield to RTOS
+        elapsed += 50;
+        
+        // Periodic status updates during long waits
+        if (elapsed - last_log >= log_interval) {
+            ESP_LOGI(TAG, "Still busy after %lu ms (BUSY pin: %d)", (unsigned long)elapsed, DEV_Digital_Read(EPD_BUSY_PIN));
+            last_log = elapsed;
+        }
+        
         if (elapsed >= EPD_BUSY_TIMEOUT_MS) {
-            ESP_LOGE(TAG, "e-Paper busy timeout after %lu ms — BUSY pin never went HIGH", (unsigned long)elapsed);
+            ESP_LOGE(TAG, "e-Paper busy timeout after %lu ms — BUSY pin never went HIGH (final level: %d)", 
+                     (unsigned long)elapsed, DEV_Digital_Read(EPD_BUSY_PIN));
             return;
         }
     }
-    DEV_Delay_ms(5);
+    DEV_Delay_ms(10);  // Small additional delay after BUSY release
     ESP_LOGI(TAG, "e-Paper busy release after %lu ms", (unsigned long)elapsed);
 }
 
@@ -101,7 +116,18 @@ UBYTE EPD_7IN5_V2_Init(void)
 {
     ESP_LOGI(TAG, "Initializing EPD 7.5 inch V2");
     
+    // Multiple reset attempts for cold start reliability
     EPD_Reset();
+    
+    // Check if BUSY is stuck low from previous deep sleep state
+    if (DEV_Digital_Read(EPD_BUSY_PIN) == 0) {
+        ESP_LOGW(TAG, "BUSY pin low after reset - attempting recovery");
+        // Try additional reset cycle
+        DEV_Digital_Write(EPD_RST_PIN, 0);
+        DEV_Delay_ms(50);
+        DEV_Digital_Write(EPD_RST_PIN, 1);
+        DEV_Delay_ms(300);
+    }
     
     EPD_SendCommand(0x01);			//POWER SETTING
 	EPD_SendData(0x07);
@@ -328,4 +354,9 @@ void EPD_7IN5_V2_Sleep(void)
     EPD_WaitUntilIdle();
     EPD_SendCommand(0x07); // DEEP_SLEEP
     EPD_SendData(0XA5);
+    
+    // Extended delay to ensure panel fully enters deep sleep before next operation
+    // The 7.5" V2 needs significant time to settle all internal circuitry
+    DEV_Delay_ms(1000);
+    ESP_LOGI(TAG, "Deep sleep complete - BUSY pin level: %d", DEV_Digital_Read(EPD_BUSY_PIN));
 }

@@ -18,6 +18,25 @@ typedef void (*wifi_prov_complete_cb_t)(void);
 esp_err_t wifi_prov_start(wifi_prov_complete_cb_t on_complete_cb);
 
 /**
+ * @brief Start persistent configuration server on current interface
+ *
+ * Starts HTTP server for configuration on whatever interface is available.
+ * Designed to work alongside normal device operation.
+ *
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t wifi_simple_config_start(void);
+
+/**
+ * @brief Start HTTP web server
+ *
+ * Internal function to start the HTTP server component
+ *
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t start_webserver(void);
+
+/**
  * @brief Stop WiFi provisioning mode
  *
  * Stops HTTP server and WiFi AP mode

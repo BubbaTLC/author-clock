@@ -8,6 +8,7 @@ typedef struct {
     char quote[1024];
     char title[128];
     char author[128];
+    char timestring[128];
 } quote_result_t;
 
 /**

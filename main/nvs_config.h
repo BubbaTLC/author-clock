@@ -62,6 +62,20 @@ esp_err_t nvs_config_save_location(const char *city, int8_t tz_offset_hours);
 esp_err_t nvs_config_load_location(char *city, int8_t *tz_offset_hours);
 
 /**
+ * Save time format preference to NVS
+ * @param use_24_hour true for 24-hour format, false for 12-hour format
+ * @return ESP_OK on success
+ */
+esp_err_t nvs_config_save_time_format(bool use_24_hour);
+
+/**
+ * Load time format preference from NVS
+ * @param use_24_hour Pointer to store time format preference
+ * @return ESP_OK on success, ESP_ERR_NVS_NOT_FOUND if no preference stored (defaults to 24-hour)
+ */
+esp_err_t nvs_config_load_time_format(bool *use_24_hour);
+
+/**
  * Clear all stored configuration data
  * @return ESP_OK on success
  */

@@ -26,26 +26,35 @@ static void time_sync_notification_cb(struct timeval *tv) {
     uint8_t hour, min, sec, day, month, weekday;
     uint16_t year;
     if (ntp_get_current_time(&hour, &min, &sec, &day, &month, &year, &weekday)) {
-        ESP_LOGI(TAG, "Current time: %04d-%02d-%02d %02d:%02d:%02d (UTC%+d)", year, month, day,
-                 hour, min, sec, s_tz_offset_hours);
+        ESP_LOGI(TAG, "Current time: %04d-%02d-%02d %02d:%02d:%02d (local time UTC%+d)", year,
+                 month, day, hour, min, sec, s_tz_offset_hours);
     }
 }
 
 esp_err_t ntp_sync_start(int8_t tz_offset_hours) {
     ESP_LOGI(TAG, "Starting NTP synchronization with UTC%+d timezone", tz_offset_hours);
 
+    // Timezone sanity check and helpful diagnostics
+    if (tz_offset_hours > 0) {
+        ESP_LOGW(TAG, "Timezone UTC%+d: Verify this is correct!", tz_offset_hours);
+        ESP_LOGW(TAG, "Common zones: Saskatoon=UTC-6, Vancouver=UTC-8, Toronto=UTC-5, "
+                      "London=UTC+0, Berlin=UTC+1");
+        ESP_LOGW(TAG,
+                 "If time shows wrong by 12h, timezone sign may be incorrect in stored config");
+    }
+
     s_tz_offset_hours = tz_offset_hours;
     s_time_synchronized = false;
 
-    // Configure timezone
+    // Configure timezone using POSIX format
+    // POSIX TZ requires the offset in hours WEST of UTC (negative of standard UTC offset)
+    // Example: For UTC-6 (like Saskatoon), local = UTC - 6, so POSIX TZ = "UTC+6"
+    // Example: For UTC+2 (like Berlin), local = UTC + 2, so POSIX TZ = "UTC-2"
     char tz_string[32];
-    if (tz_offset_hours >= 0) {
-        snprintf(tz_string, sizeof(tz_string), "UTC-%d", tz_offset_hours);
-    } else {
-        snprintf(tz_string, sizeof(tz_string), "UTC+%d", -tz_offset_hours);
-    }
+    snprintf(tz_string, sizeof(tz_string), "UTC%+d", -tz_offset_hours);
 
-    ESP_LOGI(TAG, "Setting timezone to: %s", tz_string);
+    ESP_LOGI(TAG, "Setting POSIX timezone to: %s (for local time UTC%+d)", tz_string,
+             tz_offset_hours);
     setenv("TZ", tz_string, 1);
     tzset();
 
