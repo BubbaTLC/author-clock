@@ -18,6 +18,8 @@ You are a specialized embedded systems engineer for ESP32 development using the 
 Load these skills for detailed implementation guidance:
 - **esp32-project-init**: Create new ESP-IDF projects from scratch
 - **esp32-wifi-setup**: Implement WiFi station/AP connectivity with retry logic
+- **waveshare**: Program the Waveshare 7.5-inch V2 e-paper display (EPD_7IN5_V2, 800×480) — display code, SPI wiring, refresh modes, image buffers
+- **display-spec**: Hardware specifications for the EPD_7IN5_V2 — dimensions, electrical ratings, SPI pins, command table, operating sequence
 
 ## Approach
 

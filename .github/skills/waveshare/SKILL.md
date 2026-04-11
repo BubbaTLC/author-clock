@@ -38,12 +38,12 @@ DEV_Module_Init();
 
 ### 2. Choose a refresh mode and init the display
 
-| Mode | Function | Use For |
-|------|----------|---------|
-| Normal | `EPD_7IN5_V2_Init()` | Full, high-quality refresh |
-| Fast | `EPD_7IN5_V2_Init_Fast()` | Quicker full refresh (slight ghosting OK) |
-| Partial | `EPD_7IN5_V2_Init_Part()` | Update a small region without full flash |
-| 4-Gray | `EPD_7IN5_V2_Init_4Gray()` | Grayscale rendering (4 levels) |
+| Mode    | Function                   | Use For                                   |
+| ------- | -------------------------- | ----------------------------------------- |
+| Normal  | `EPD_7IN5_V2_Init()`       | Full, high-quality refresh                |
+| Fast    | `EPD_7IN5_V2_Init_Fast()`  | Quicker full refresh (slight ghosting OK) |
+| Partial | `EPD_7IN5_V2_Init_Part()`  | Update a small region without full flash  |
+| 4-Gray  | `EPD_7IN5_V2_Init_4Gray()` | Grayscale rendering (4 levels)            |
 
 ### 3. Clear the display (optional but recommended on first boot)
 ```cpp
