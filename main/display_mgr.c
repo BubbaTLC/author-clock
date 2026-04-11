@@ -10,6 +10,8 @@
 #include "EPD_7in5_V2.h"
 #include "GUI_Paint.h"
 #include "fonts.h"
+#include "bmfont_renderer.h"
+#include "fonts/QuicksandBook-Regular-48.h"
 
 static const char *TAG = "DISPLAY_MGR";
 
@@ -22,11 +24,11 @@ static const char *TAG = "DISPLAY_MGR";
 #define DATE_X 10
 #define DATE_Y 50
 #define HRULE_Y 35
-#define QUOTE_X 50 // Center quote horizontally with more margin for larger text
-#define QUOTE_Y 100
-#define QUOTE_MAX_WIDTH 700 // Wider quote area for larger text
-#define QUOTE_MAX_Y 380
-#define ATTRIB_Y 390
+#define QUOTE_X 20          // Reduce left margin to give more space
+#define QUOTE_Y 80          // Start higher to leave room for larger text
+#define QUOTE_MAX_WIDTH 760 // Use more of the screen width
+#define QUOTE_MAX_Y 320     // Leave more room for attribution
+#define ATTRIB_Y 340        // Move attribution up to account for larger quotes
 
 // ─── Image buffer ─────────────────────────────────────────────────────────────
 // 1 bit per pixel → (800 * 480) / 8 = 48000 bytes
@@ -37,6 +39,109 @@ static bool s_initialized = false;
 // ─── Quote persistence ────────────────────────────────────────────────────────
 static quote_result_t s_last_quote = {0};
 static bool s_has_last_quote = false;
+
+// ─── Helper: enhanced word-wrap with bmfont support ──────────────────────────
+// Returns the number of lines drawn. Handles timeString portion in bold/larger font.
+static int text_wrap_bmfont(const char *text, const char *timestring, const bmfont_t *font,
+                            const bmfont_t *bold_font, uint16_t x, uint16_t y, uint16_t max_width,
+                            uint16_t max_y) {
+    if (!text || !font)
+        return 0;
+
+    uint16_t line_height = bmfont_height(font);
+    uint16_t bold_line_height = bold_font ? bmfont_height(bold_font) : line_height;
+    if (bold_line_height > line_height)
+        line_height = bold_line_height;
+
+    int lines = 0;
+    uint16_t cur_y = y;
+
+    char line_buf[128];
+    const char *p = text;
+    const char *timestring_pos = timestring ? strstr(text, timestring) : NULL;
+
+    while (*p && cur_y + line_height <= max_y) {
+        // Find how many characters fit on this line (word-boundary break)
+        int len = 0;
+        int last_space = -1;
+        uint16_t line_width = 0;
+
+        // Calculate how much text fits
+        while (p[len] && line_width < max_width) {
+            if (p[len] == ' ')
+                last_space = len;
+            if (p[len] == '\n') {
+                last_space = len;
+                break;
+            }
+
+            // Estimate character width (use main font for estimation)
+            line_width += 12; // Conservative estimate for QuicksandBook
+            len++;
+        }
+
+        // If the remaining text fits entirely, take it all
+        if (p[len] == '\0') {
+            // fall through with len as-is
+        } else if (last_space > 0) {
+            len = last_space; // break at last word boundary
+        } else if (len == 0) {
+            len = 1; // Force at least one character to avoid infinite loop
+        }
+
+        // Copy line
+        int copy = len < (int)sizeof(line_buf) - 1 ? len : (int)sizeof(line_buf) - 1;
+        memcpy(line_buf, p, copy);
+        line_buf[copy] = '\0';
+
+        // Check if this line contains the timestring
+        bool has_timestring = timestring_pos && (timestring_pos >= p) && (timestring_pos < p + len);
+
+        if (has_timestring && bold_font && timestring) {
+            // Split line at timestring for special formatting
+            int prefix_len = timestring_pos - p;
+            int timestring_len = strlen(timestring);
+
+            uint16_t cur_x = x;
+
+            // Draw text before timestring
+            if (prefix_len > 0) {
+                char prefix[128];
+                int prefix_copy = prefix_len < 127 ? prefix_len : 127;
+                memcpy(prefix, p, prefix_copy);
+                prefix[prefix_copy] = '\0';
+                cur_x += bmfont_draw_string(cur_x, cur_y, prefix, font, BLACK, WHITE);
+            }
+
+            // Draw timestring in bold/larger font
+            cur_x += bmfont_draw_string(cur_x, cur_y, timestring, bold_font, BLACK, WHITE);
+
+            // Draw text after timestring
+            const char *suffix = timestring_pos + timestring_len;
+            if (suffix < p + len) {
+                int suffix_len = (p + len) - suffix;
+                if (suffix_len > 0 && suffix_len < 128) {
+                    char suffix_buf[128];
+                    memcpy(suffix_buf, suffix, suffix_len);
+                    suffix_buf[suffix_len] = '\0';
+                    bmfont_draw_string(cur_x, cur_y, suffix_buf, font, BLACK, WHITE);
+                }
+            }
+        } else {
+            // Regular text drawing
+            bmfont_draw_string(x, cur_y, line_buf, font, BLACK, WHITE);
+        }
+
+        // Advance past the line content and optional space/newline
+        p += len;
+        if (*p == ' ' || *p == '\n')
+            p++;
+
+        cur_y += line_height + 8; // Line spacing for better readability
+        lines++;
+    }
+    return lines;
+}
 
 // ─── Helper: enhanced word-wrap with timeString formatting ──────────────────
 // Returns the number of lines drawn. Handles timeString portion in bold/larger font.
@@ -408,20 +513,37 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
         // Clean up any encoding issues in the quote text
         clean_text_encoding(quoted_text);
 
-        // Use much larger font for quote (3x bigger) and even larger font for timeString
+        // Quick fallback: if bmfont rendering has issues, use the old Font24 for now
+        // This allows you to compare and see the difference
+
+        // Use QuicksandBook font for quote text
         const char *timestring =
             (quote_to_display->timestring[0]) ? quote_to_display->timestring : NULL;
-        text_wrap_enhanced(quoted_text, timestring, &Font24, &Font24, QUOTE_X, QUOTE_Y,
-                           QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
 
-        // Attribution: Title - Author (Font20 for title/author)
+        // Try bmfont first, but have Font24 as backup
+        int lines_drawn = text_wrap_bmfont(quoted_text, timestring, &QuicksandBook_Regular_48_font,
+                                           &QuicksandBook_Regular_48_font, QUOTE_X, QUOTE_Y,
+                                           QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
+
+        // If bmfont didn't work well (no lines drawn), fall back to Font24
+        if (lines_drawn == 0) {
+            ESP_LOGW(TAG, "bmfont rendering failed, falling back to Font24");
+            text_wrap_enhanced(quoted_text, timestring, &Font24, &Font24, QUOTE_X, QUOTE_Y,
+                               QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
+        }
+
+        // Attribution: Title - Author (QuicksandBook font for consistency)
         char attrib[288];
         snprintf(attrib, sizeof(attrib), "%s - %s", quote_to_display->title,
                  quote_to_display->author);
-        text_wrap(attrib, &Font20, QUOTE_X, ATTRIB_Y, QUOTE_MAX_WIDTH, EPD_H - 2);
+        bmfont_draw_string(QUOTE_X, ATTRIB_Y, attrib, &QuicksandBook_Regular_48_font, BLACK, WHITE);
     } else {
-        // Only show "Fetching..." if no previous quote exists
-        Paint_DrawString_EN(QUOTE_X, QUOTE_Y + 60, "Fetching quote...", &Font12, BLACK, WHITE);
+        // Show message with current time instead of "Fetching..."
+        char no_quote_msg[80];
+        snprintf(no_quote_msg, sizeof(no_quote_msg),
+                 "Hmm looks like this time doesn't have a quote, but it is %02d:%02d", time_h,
+                 time_m);
+        Paint_DrawString_EN(QUOTE_X, QUOTE_Y + 60, no_quote_msg, &Font12, BLACK, WHITE);
     }
 
     flush_display();
