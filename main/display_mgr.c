@@ -408,30 +408,32 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
         snprintf(attrib, sizeof(attrib), "%s - %s", quote->title, quote->author);
         bmfont_draw_string(QUOTE_X, quote_end_y + 30, attrib, &font_attrib, BLACK, WHITE);
     } else {
-        // Show message with current time instead of "Fetching..."
+        // Show message with current time. Format the time part separately so it
+        // can be passed as the timestring and rendered in bold.
+        char time_str[16];
         char no_quote_msg[96];
+
         if (use_24_hour) {
-            snprintf(no_quote_msg, sizeof(no_quote_msg),
-                     "Hmm, looks like this time doesn't have a quote, but it is %02d:%02d.", time_h,
-                     time_m);
+            snprintf(time_str, sizeof(time_str), "%02d:%02d", time_h, time_m);
         } else {
-            // Convert to 12-hour format
             uint8_t display_hour = time_h;
             const char *ampm = "AM";
             if (time_h == 0) {
-                display_hour = 12; // Midnight is 12:xx AM
+                display_hour = 12;
             } else if (time_h == 12) {
-                ampm = "PM"; // Noon is 12:xx PM
+                ampm = "PM";
             } else if (time_h > 12) {
                 display_hour = time_h - 12;
                 ampm = "PM";
             }
-            snprintf(no_quote_msg, sizeof(no_quote_msg),
-                     "Hmm, looks like this time doesn't have a quote, but it is %d:%02d %s.",
-                     display_hour, time_m, ampm);
+            snprintf(time_str, sizeof(time_str), "%d:%02d %s", display_hour, time_m, ampm);
         }
-        text_wrap_bmfont(no_quote_msg, NULL, &font_body, NULL, QUOTE_X, QUOTE_Y, QUOTE_MAX_WIDTH,
-                         QUOTE_MAX_Y);
+
+        snprintf(no_quote_msg, sizeof(no_quote_msg),
+                 "Hmm, looks like this time doesn't have a quote, but it is %s.", time_str);
+
+        text_wrap_bmfont(no_quote_msg, time_str, &font_body, &font_body_bold, QUOTE_X, QUOTE_Y,
+                         QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
     }
 
     flush_display();
