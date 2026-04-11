@@ -22,7 +22,7 @@ static const char *TAG = "DISPLAY_MGR";
 #define TIME_Y 10
 #define DATE_X 10
 #define DATE_Y 50
-#define HRULE_Y 35
+#define HRULE_Y 45
 #define QUOTE_X 20          // Reduce left margin to give more space
 #define QUOTE_Y 80          // Start higher to leave room for larger text
 #define QUOTE_MAX_WIDTH 760 // Use more of the screen width
@@ -39,6 +39,57 @@ static bool s_initialized = false;
 // ─── Helper: enhanced word-wrap with bmfont support ──────────────────────────
 // Returns the Y position immediately after the last drawn line (useful for placing
 // elements dynamically below the text block). Handles timeString portion in bold.
+// ─── Helper: measure line width using the correct font per segment ─────────────
+// Uses bold_font for characters that fall within [ts_pos, ts_pos+ts_len),
+// regular font for everything else. Matches how the line will actually be drawn.
+static uint16_t mixed_string_width(const char *p, int len, const bmfont_t *font,
+                                   const bmfont_t *bold_font, const char *ts_pos, int ts_len) {
+    char buf[512];
+    int n;
+
+    // Fast path: no bold overlap in this segment
+    if (!bold_font || !ts_pos || ts_len == 0 || ts_pos >= p + len || ts_pos + ts_len <= p) {
+        n = len < (int)sizeof(buf) - 1 ? len : (int)sizeof(buf) - 1;
+        memcpy(buf, p, n);
+        buf[n] = '\0';
+        return bmfont_string_width(buf, font);
+    }
+
+    uint16_t w = 0;
+
+    // Prefix in regular font: [p, ts_pos)
+    if (ts_pos > p) {
+        n = (int)(ts_pos - p);
+        n = n < (int)sizeof(buf) - 1 ? n : (int)sizeof(buf) - 1;
+        memcpy(buf, p, n);
+        buf[n] = '\0';
+        w += bmfont_string_width(buf, font);
+    }
+
+    // Bold section: intersect [ts_pos, ts_pos+ts_len) with [p, p+len)
+    const char *bold_start = ts_pos > p ? ts_pos : p;
+    const char *bold_end = (ts_pos + ts_len) < (p + len) ? (ts_pos + ts_len) : (p + len);
+    if (bold_end > bold_start) {
+        n = (int)(bold_end - bold_start);
+        n = n < (int)sizeof(buf) - 1 ? n : (int)sizeof(buf) - 1;
+        memcpy(buf, bold_start, n);
+        buf[n] = '\0';
+        w += bmfont_string_width(buf, bold_font);
+    }
+
+    // Suffix in regular font: [ts_pos+ts_len, p+len)
+    if (ts_pos + ts_len < p + len) {
+        const char *sfx = ts_pos + ts_len;
+        n = (int)((p + len) - sfx);
+        n = n < (int)sizeof(buf) - 1 ? n : (int)sizeof(buf) - 1;
+        memcpy(buf, sfx, n);
+        buf[n] = '\0';
+        w += bmfont_string_width(buf, font);
+    }
+
+    return w;
+}
+
 static int text_wrap_bmfont(const char *text, const char *timestring, const bmfont_t *font,
                             const bmfont_t *bold_font, uint16_t x, uint16_t y, uint16_t max_width,
                             uint16_t max_y) {
@@ -56,6 +107,7 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
     char line_buf[128];
     const char *p = text;
     const char *timestring_pos = timestring ? strstr(text, timestring) : NULL;
+    int ts_len = (timestring && timestring_pos) ? (int)strlen(timestring) : 0;
 
     while (*p && cur_y + line_height <= max_y) {
         // Find how many characters fit on this line (word-boundary break)
@@ -63,7 +115,7 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
         int last_space = -1;
         uint16_t line_width = 0;
 
-        // Calculate how much text fits
+        // Calculate how much text fits, measuring bold sections with bold_font
         while (p[len]) {
             if (p[len] == ' ')
                 last_space = len;
@@ -72,16 +124,10 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
                 break;
             }
 
-            // Create a temporary string to measure actual width
-            char temp_str[len + 2];
-            memcpy(temp_str, p, len + 1);
-            temp_str[len + 1] = '\0';
-
-            // Use actual font width calculation
-            line_width = bmfont_string_width(temp_str, font);
+            line_width = mixed_string_width(p, len + 1, font, bold_font, timestring_pos, ts_len);
 
             if (line_width >= max_width) {
-                break; // This character would exceed the line width
+                break;
             }
 
             len++;
@@ -120,7 +166,7 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
                 cur_x += bmfont_draw_string(cur_x, cur_y, prefix, font, BLACK, WHITE);
             }
 
-            // Draw timestring in bold/larger font
+            // Draw timestring in bold font
             cur_x += bmfont_draw_string(cur_x, cur_y, timestring, bold_font, BLACK, WHITE);
 
             // Draw text after timestring
