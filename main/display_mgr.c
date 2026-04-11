@@ -9,9 +9,8 @@
 
 #include "EPD_7in5_V2.h"
 #include "GUI_Paint.h"
-#include "fonts.h"
 #include "bmfont_renderer.h"
-#include "fonts/QuicksandBook-Regular-48.h"
+#include "fonts/font_select.h"
 
 static const char *TAG = "DISPLAY_MGR";
 
@@ -153,160 +152,6 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
     return lines;
 }
 
-// ─── Helper: enhanced word-wrap with timeString formatting ──────────────────
-// Returns the number of lines drawn. Handles timeString portion in bold/larger font.
-static int text_wrap_enhanced(const char *text, const char *timestring, sFONT *font,
-                              sFONT *bold_font, uint16_t x, uint16_t y, uint16_t max_width,
-                              uint16_t max_y) {
-    if (!text || !font)
-        return 0;
-
-    int char_w = font->Width;
-    int char_h = font->Height;
-    int bold_char_h = bold_font ? bold_font->Height : char_h;
-    int line_height = (bold_char_h > char_h) ? bold_char_h : char_h;
-    int cols = max_width / char_w;
-    int lines = 0;
-    uint16_t cur_y = y;
-
-    char line_buf[128];
-    const char *p = text;
-    const char *timestring_pos = timestring ? strstr(text, timestring) : NULL;
-
-    while (*p && cur_y + line_height <= max_y) {
-        // Find how many characters fit on this line (word-boundary break)
-        int len = 0;
-        int last_space = -1;
-
-        while (p[len] && len < cols) {
-            if (p[len] == ' ')
-                last_space = len;
-            if (p[len] == '\n') {
-                last_space = len;
-                break;
-            }
-            len++;
-        }
-
-        // If the remaining text fits entirely, take it all
-        if (p[len] == '\0') {
-            // fall through with len as-is
-        } else if (last_space > 0) {
-            len = last_space; // break at last word boundary
-        }
-
-        // Copy and draw
-        int copy = len < (int)sizeof(line_buf) - 1 ? len : (int)sizeof(line_buf) - 1;
-        memcpy(line_buf, p, copy);
-        line_buf[copy] = '\0';
-
-        // Check if this line contains the timestring
-        bool has_timestring = timestring_pos && (timestring_pos >= p) && (timestring_pos < p + len);
-
-        if (has_timestring && bold_font && timestring) {
-            // Split line at timestring for special formatting
-            int prefix_len = timestring_pos - p;
-            int timestring_len = strlen(timestring);
-
-            // Draw text before timestring
-            if (prefix_len > 0) {
-                char prefix[128];
-                int prefix_copy = prefix_len < 127 ? prefix_len : 127;
-                memcpy(prefix, p, prefix_copy);
-                prefix[prefix_copy] = '\0';
-                Paint_DrawString_EN(x, cur_y, prefix, font, BLACK, WHITE);
-            }
-
-            // Draw timestring in bold/larger font
-            uint16_t timestring_x = x + (prefix_len * char_w);
-            Paint_DrawString_EN(timestring_x, cur_y, timestring, bold_font, BLACK, WHITE);
-
-            // Draw text after timestring
-            const char *suffix = timestring_pos + timestring_len;
-            if (suffix < p + len) {
-                uint16_t suffix_x =
-                    timestring_x + (timestring_len * (bold_font ? bold_font->Width : char_w));
-                int suffix_len = (p + len) - suffix;
-                if (suffix_len > 0 && suffix_len < 128) {
-                    char suffix_buf[128];
-                    memcpy(suffix_buf, suffix, suffix_len);
-                    suffix_buf[suffix_len] = '\0';
-                    Paint_DrawString_EN(suffix_x, cur_y, suffix_buf, font, BLACK, WHITE);
-                }
-            }
-        } else {
-            // Regular text drawing
-            Paint_DrawString_EN(x, cur_y, line_buf, font, BLACK, WHITE);
-        }
-
-        // Advance past the line content and optional space/newline
-        p += len;
-        if (*p == ' ' || *p == '\n')
-            p++;
-
-        cur_y += line_height + 6; // Increased line spacing for larger appearance
-        lines++;
-    }
-    return lines;
-}
-
-// ─── Helper: word-wrap text into the EPD ─────────────────────────────────────
-// Returns the number of lines drawn.
-static int text_wrap(const char *text, sFONT *font, uint16_t x, uint16_t y, uint16_t max_width,
-                     uint16_t max_y) {
-    if (!text || !font)
-        return 0;
-
-    int char_w = font->Width;
-    int char_h = font->Height;
-    int cols = max_width / char_w;
-    int lines = 0;
-    uint16_t cur_y = y;
-
-    char line_buf[128];
-    const char *p = text;
-
-    while (*p && cur_y + char_h <= max_y) {
-        // Find how many characters fit on this line (word-boundary break)
-        int len = 0;
-        int last_space = -1;
-
-        while (p[len] && len < cols) {
-            if (p[len] == ' ')
-                last_space = len;
-            if (p[len] == '\n') {
-                last_space = len;
-                break;
-            }
-            len++;
-        }
-
-        // If the remaining text fits entirely, take it all
-        if (p[len] == '\0') {
-            // fall through with len as-is
-        } else if (last_space > 0) {
-            len = last_space; // break at last word boundary
-        }
-        // else no space found — hard-break at col width
-
-        // Copy and draw
-        int copy = len < (int)sizeof(line_buf) - 1 ? len : (int)sizeof(line_buf) - 1;
-        memcpy(line_buf, p, copy);
-        line_buf[copy] = '\0';
-
-        Paint_DrawString_EN(x, cur_y, line_buf, font, BLACK, WHITE);
-
-        // Advance past the line content and optional space/newline
-        p += len;
-        if (*p == ' ' || *p == '\n')
-            p++;
-
-        cur_y += char_h + 6; // Increased line spacing for larger appearance
-        lines++;
-    }
-    return lines;
-}
-
 // ─── Helper: clean text encoding issues ───────────────────────────────────────
 static void clean_text_encoding(char *text) {
     if (!text)
@@ -428,21 +273,21 @@ void display_mgr_show_provisioning(const char *ap_ssid, const char *ip_str) {
 
     Paint_Clear(WHITE);
 
-    Paint_DrawString_EN(10, 80, "Author Clock Setup", &Font24, BLACK, WHITE);
-    Paint_DrawString_EN(10, 130, "1. Connect your phone to WiFi:", &Font12, BLACK, WHITE);
+    bmfont_draw_string(10, 80, "Author Clock Setup", &font_ui, BLACK, WHITE);
+    bmfont_draw_string(10, 130, "1. Connect your phone to WiFi:", &font_ui, BLACK, WHITE);
 
     char ssid_line[64];
     snprintf(ssid_line, sizeof(ssid_line), "   \"%s\"", ap_ssid ? ap_ssid : "AuthorClock");
-    Paint_DrawString_EN(10, 155, ssid_line, &Font20, BLACK, WHITE);
+    bmfont_draw_string(10, 155, ssid_line, &font_ui, BLACK, WHITE);
 
-    Paint_DrawString_EN(10, 210, "2. Open a browser and visit:", &Font12, BLACK, WHITE);
+    bmfont_draw_string(10, 210, "2. Open a browser and visit:", &font_ui, BLACK, WHITE);
 
     char url_line[64];
     snprintf(url_line, sizeof(url_line), "   http://%s", ip_str ? ip_str : "192.168.4.69");
-    Paint_DrawString_EN(10, 235, url_line, &Font20, BLACK, WHITE);
+    bmfont_draw_string(10, 235, url_line, &font_ui, BLACK, WHITE);
 
-    Paint_DrawString_EN(10, 295, "3. Fill in the form with your", &Font12, BLACK, WHITE);
-    Paint_DrawString_EN(10, 318, "   WiFi credentials and city.", &Font12, BLACK, WHITE);
+    bmfont_draw_string(10, 295, "3. Fill in the form with your", &font_ui, BLACK, WHITE);
+    bmfont_draw_string(10, 318, "   WiFi credentials and city.", &font_ui, BLACK, WHITE);
 
     flush_display();
 }
@@ -453,12 +298,12 @@ void display_mgr_show_connecting(const char *ssid) {
     ESP_LOGI(TAG, "Showing connecting screen for: %s", ssid ? ssid : "?");
 
     Paint_Clear(WHITE);
-    Paint_DrawString_EN(10, 200, "Connecting to WiFi...", &Font24, BLACK, WHITE);
+    bmfont_draw_string(10, 200, "Connecting to WiFi...", &font_ui, BLACK, WHITE);
 
     if (ssid) {
         char buf[64];
         snprintf(buf, sizeof(buf), "\"%s\"", ssid);
-        Paint_DrawString_EN(10, 240, buf, &Font20, BLACK, WHITE);
+        bmfont_draw_string(10, 240, buf, &font_ui, BLACK, WHITE);
     }
 
     flush_display();
@@ -470,10 +315,10 @@ void display_mgr_show_error(const char *msg) {
     ESP_LOGE(TAG, "Showing error: %s", msg ? msg : "(null)");
 
     Paint_Clear(WHITE);
-    Paint_DrawString_EN(10, 190, "Error:", &Font24, BLACK, WHITE);
+    bmfont_draw_string(10, 190, "Error:", &font_ui, BLACK, WHITE);
 
     if (msg) {
-        text_wrap(msg, &Font12, 10, 230, EPD_W - 20, EPD_H - 20);
+        text_wrap_bmfont(msg, NULL, &font_ui, NULL, 10, 230, EPD_W - 20, EPD_H - 20);
     }
 
     flush_display();
@@ -495,8 +340,7 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
     char datetime_str[80];
     format_datetime_string(datetime_str, sizeof(datetime_str), time_h, time_m, date_str,
                            use_24_hour);
-    // Display time with Font12 (7x12 pixels)
-    Paint_DrawString_EN(TIME_X, TIME_Y, datetime_str, &Font12, BLACK, WHITE);
+    bmfont_draw_string(TIME_X, TIME_Y, datetime_str, &font_ui, BLACK, WHITE);
 
     // ── Horizontal rule below date ────────────────────────────────────────────
     Paint_DrawLine(0, HRULE_Y, EPD_W, HRULE_Y, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
@@ -523,30 +367,17 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
         // Clean up any encoding issues in the quote text
         clean_text_encoding(quoted_text);
 
-        // Quick fallback: if bmfont rendering has issues, use the old Font24 for now
-        // This allows you to compare and see the difference
-
-        // Use QuicksandBook font for quote text
         const char *timestring =
             (quote_to_display->timestring[0]) ? quote_to_display->timestring : NULL;
 
-        // Try bmfont first, but have Font24 as backup
-        int lines_drawn = text_wrap_bmfont(quoted_text, timestring, &QuicksandBook_Regular_48_font,
-                                           &QuicksandBook_Regular_48_font, QUOTE_X, QUOTE_Y,
-                                           QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
+        text_wrap_bmfont(quoted_text, timestring, &font_body, &font_body_bold, QUOTE_X, QUOTE_Y,
+                         QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
 
-        // If bmfont didn't work well (no lines drawn), fall back to Font24
-        if (lines_drawn == 0) {
-            ESP_LOGW(TAG, "bmfont rendering failed, falling back to Font24");
-            text_wrap_enhanced(quoted_text, timestring, &Font24, &Font24, QUOTE_X, QUOTE_Y,
-                               QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
-        }
-
-        // Attribution: Title - Author (QuicksandBook font for consistency)
+        // Attribution: Title - Author
         char attrib[288];
         snprintf(attrib, sizeof(attrib), "%s - %s", quote_to_display->title,
                  quote_to_display->author);
-        bmfont_draw_string(QUOTE_X, ATTRIB_Y, attrib, &QuicksandBook_Regular_48_font, BLACK, WHITE);
+        bmfont_draw_string(QUOTE_X, ATTRIB_Y, attrib, &font_attrib, BLACK, WHITE);
     } else {
         // Show message with current time instead of "Fetching..."
         char no_quote_msg[80];
@@ -570,8 +401,7 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
                      "Hmm looks like this time doesn't have a quote, but it is %d:%02d %s",
                      display_hour, time_m, ampm);
         }
-        bmfont_draw_string(QUOTE_X, QUOTE_Y + 60, no_quote_msg, &QuicksandBook_Regular_48_font,
-                           BLACK, WHITE);
+        bmfont_draw_string(QUOTE_X, QUOTE_Y + 60, no_quote_msg, &font_body, BLACK, WHITE);
     }
 
     flush_display();
