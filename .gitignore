@@ -92,5 +92,9 @@ data.json
 # the global __pycache__/ rule above, but listed here for clarity)
 tools/__pycache__/
 
+# Quote-search tool outputs — not committed; reviewed locally before merging
+tools/.search_cache/
+tools/candidates.json
+
 # pre-commit framework cache directory
 .pre-commit-cache/

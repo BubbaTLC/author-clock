@@ -147,6 +147,39 @@ Quotes are stored in a binary format for efficient access. To update:
 2. Run `python tools/gen_quotes_bin.py` to generate binary file
 3. Flash the updated partition: `idf.py partition-table-flash`
 
+### Finding Quotes for Missing Times
+
+528 of the 1440 daily minutes currently have no quote. Use the search tool to find candidates:
+
+```bash
+# Find quotes for up to 50 missing times (good for daily batching)
+python3 tools/find_missing_quotes.py --limit 50
+
+# Process all missing times at once
+python3 tools/find_missing_quotes.py
+```
+
+Results are written to `tools/candidates.json` in the same format as `data.json`. Review
+the file, remove any entries you don't want, then append the keepers to `data.json`.
+
+**How it works:**
+- Identifies every `HH:MM` not present in `data.json`
+- Generates search strings in both numeric form (`1:03 am`, `0103h`) and word form
+  (`three minutes past one`, `one oh three`, `quarter to two`, `half past six`)
+- Queries the **Google Books API** (free, no key required) filtered to fiction
+- Keeps up to **3 candidates per time**, ranked by distinct titles and quote quality
+- Caches all API responses in `tools/.search_cache/` — re-runs skip cached queries
+- Never modifies `data.json` directly
+
+**Optional — Google Custom Search:**
+Add `GOOGLE_CSE_KEY` and `GOOGLE_CSE_CX` to `.env` to also search the web via
+Google Custom Search (100 free queries/day).
+
+```bash
+# See all options
+python3 tools/find_missing_quotes.py --help
+```
+
 ### Custom Timezone Handling
 
 The project uses POSIX timezone format internally:
