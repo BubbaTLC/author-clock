@@ -181,22 +181,30 @@ def _extract_quote(snippet: str, time_phrase: str) -> str | None:
         # Fallback: use full snippet if it's a reasonable length
         return text if _MIN_LEN <= len(text) <= _MAX_LEN else None
 
-    # ── Walk LEFT to the nearest sentence boundary ─────────────────────────────
-    # Aim for up to 250 chars of context before the time phrase so it can sit
-    # in the middle or end of the extracted quote.
-    left = 0
-    for i in range(idx - 1, max(idx - 300, -1), -1):
+    # ── Walk LEFT collecting up to two sentence boundaries ────────────────────
+    # Two boundaries let us include the previous sentence when the time phrase
+    # sits near the start of its own sentence (time mid-quote rather than first
+    # word).
+    left_bounds: list[int] = []
+    for i in range(idx - 1, max(idx - 400, -1), -1):
         if text[i] in ".?!…\n":
-            left = i + 1
-            # Skip leading whitespace after boundary
-            while left < idx and text[left] == " ":
-                left += 1
-            break
-    # If no sentence boundary found within 250 chars, start at the beginning
-    # of the snippet (but strip leading ellipsis artifacts)
-    stripped_start = text.lstrip(". …\t\n")
-    if left == 0 and text != stripped_start:
-        left = len(text) - len(stripped_start)
+            pos = i + 1
+            while pos < idx and text[pos] == " ":
+                pos += 1
+            left_bounds.append(pos)
+            if len(left_bounds) == 2:
+                break
+
+    if not left_bounds:
+        stripped_start = text.lstrip(". …\t\n")
+        left = len(text) - len(stripped_start) if text != stripped_start else 0
+    else:
+        left = left_bounds[0]
+        # If the time phrase starts within 15 chars of its sentence boundary
+        # (i.e., time opens the sentence), include the previous sentence so the
+        # time lands in the middle of the extracted quote.
+        if idx - left < 15 and len(left_bounds) > 1:
+            left = left_bounds[1]
 
     # ── Walk RIGHT to the nearest sentence boundary ────────────────────────────
     phrase_end = idx + len(norm_phrase)
@@ -208,9 +216,13 @@ def _extract_quote(snippet: str, time_phrase: str) -> str | None:
 
     quote = text[left:right].strip()
 
+    # Strip leading ellipsis artifacts that Google Books inserts at snippet
+    # boundaries ("...", "…").  These are API markers, not original book text.
+    quote = re.sub(r"^[.…]+\s*", "", quote).strip()
+
     # ── Length guard ────────────────────────────────────────────────────────────
     if len(quote) < _MIN_LEN:
-        quote = text.strip()
+        quote = re.sub(r"^[.…]+\s*", "", text).strip()
     if len(quote) > _MAX_LEN:
         truncated = quote[:_MAX_LEN]
         last = max(truncated.rfind("."), truncated.rfind("?"), truncated.rfind("!"))

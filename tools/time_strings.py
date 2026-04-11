@@ -205,20 +205,27 @@ def priority_queries(time_str: str, limit: int = 5) -> list[str]:
 
     if m == 0:
         bare = f"{h_word} o'clock"
-        ordered += [f"it was {bare}", bare, f"at {bare}", f"{h12}:{m:02d} {ampm}"]
+        ordered += [
+            f"it was {bare}",
+            f"at {bare}",
+            bare,
+            f"by {bare}",
+            f"{h12}:{m:02d} {ampm}",
+        ]
     elif m == 15:
         bare = f"quarter past {h_word}"
         ordered += [
             f"it was {bare}",
+            f"at {bare}",
             bare,
             f"quarter after {h_word}",
-            f"fifteen past {h_word}",
             f"{h12}:{m:02d} {ampm}",
         ]
     elif m == 30:
         bare = f"half past {h_word}"
         ordered += [
             f"it was {bare}",
+            f"at {bare}",
             bare,
             f"half-past {h_word}",
             f"{h12}:{m:02d} {ampm}",
@@ -229,22 +236,22 @@ def priority_queries(time_str: str, limit: int = 5) -> list[str]:
         bare = f"quarter to {next_h_word}"
         ordered += [
             f"it was {bare}",
+            f"at {bare}",
             bare,
             f"quarter-to {next_h_word}",
-            f"fifteen to {next_h_word}",
             f"{h12}:{m:02d} {ampm}",
         ]
     elif m < 30:
         bare = f"{m_word} minutes past {h_word}"
         ordered += [
             f"it was {bare}",
+            f"at {bare}",
             bare,
             f"{m_word} past {h_word}",
         ]
         if 1 <= m <= 9:
             ordered.append(f"{h_word} oh {_ONES[m]}")
         ordered += [
-            f"{h_word} {m_word}",
             f"{h12}:{m:02d} {ampm}",
             f"{h12}.{m:02d}{ampm}",
         ]
@@ -256,9 +263,9 @@ def priority_queries(time_str: str, limit: int = 5) -> list[str]:
         bare = f"{mins_to_word} minutes to {next_h_word}"
         ordered += [
             f"it was {bare}",
+            f"at {bare}",
             bare,
             f"{mins_to_word} to {next_h_word}",
-            f"{h_word} {m_word}",
             f"{h12}:{m:02d} {ampm}",
             f"{h12}.{m:02d}{ampm}",
         ]
