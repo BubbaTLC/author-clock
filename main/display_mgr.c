@@ -21,12 +21,12 @@ static const char *TAG = "DISPLAY_MGR";
 #define TIME_Y 10
 #define DATE_X 10
 #define DATE_Y 50
-#define HRULE_Y 85
-#define QUOTE_X 100 // Center quote horizontally
-#define QUOTE_Y 95
-#define QUOTE_MAX_WIDTH 600 // Centered quote area width
-#define QUOTE_MAX_Y 420
-#define ATTRIB_Y 432
+#define HRULE_Y 35
+#define QUOTE_X 50 // Center quote horizontally with more margin for larger text
+#define QUOTE_Y 100
+#define QUOTE_MAX_WIDTH 700 // Wider quote area for larger text
+#define QUOTE_MAX_Y 380
+#define ATTRIB_Y 390
 
 // ─── Image buffer ─────────────────────────────────────────────────────────────
 // 1 bit per pixel → (800 * 480) / 8 = 48000 bytes
@@ -129,7 +129,7 @@ static int text_wrap_enhanced(const char *text, const char *timestring, sFONT *f
         if (*p == ' ' || *p == '\n')
             p++;
 
-        cur_y += line_height + 2;
+        cur_y += line_height + 6; // Increased line spacing for larger appearance
         lines++;
     }
     return lines;
@@ -186,10 +186,44 @@ static int text_wrap(const char *text, sFONT *font, uint16_t x, uint16_t y, uint
         if (*p == ' ' || *p == '\n')
             p++;
 
-        cur_y += char_h + 2;
+        cur_y += char_h + 6; // Increased line spacing for larger appearance
         lines++;
     }
     return lines;
+}
+
+// ─── Helper: clean text encoding issues ───────────────────────────────────────
+static void clean_text_encoding(char *text) {
+    if (!text)
+        return;
+
+    char *p = text;
+    while (*p) {
+        // Replace UTF-8 smart quotes with regular ASCII quotes
+        if ((unsigned char)*p == 0xe2 && (unsigned char)*(p + 1) == 0x80) {
+            if ((unsigned char)*(p + 2) == 0x98 || (unsigned char)*(p + 2) == 0x99) {
+                // Left/right single quotes → regular apostrophe
+                *p = '\'';
+                memmove(p + 1, p + 3, strlen(p + 3) + 1);
+            } else if ((unsigned char)*(p + 2) == 0x9c || (unsigned char)*(p + 2) == 0x9d) {
+                // Left/right double quotes → regular quotes
+                *p = '"';
+                memmove(p + 1, p + 3, strlen(p + 3) + 1);
+            } else if ((unsigned char)*(p + 2) == 0x94) {
+                // Em dash → regular dash
+                *p = '-';
+                memmove(p + 1, p + 3, strlen(p + 3) + 1);
+            } else {
+                p++;
+            }
+        } else if ((unsigned char)*p >= 128) {
+            // Replace any other non-ASCII characters with space
+            *p = ' ';
+            p++;
+        } else {
+            p++;
+        }
+    }
 }
 
 // ─── Helper: format combined date/time string ────────────────────────────────
@@ -280,20 +314,20 @@ void display_mgr_show_provisioning(const char *ap_ssid, const char *ip_str) {
     Paint_Clear(WHITE);
 
     Paint_DrawString_EN(10, 80, "Author Clock Setup", &Font24, BLACK, WHITE);
-    Paint_DrawString_EN(10, 130, "1. Connect your phone to WiFi:", &Font16, BLACK, WHITE);
+    Paint_DrawString_EN(10, 130, "1. Connect your phone to WiFi:", &Font12, BLACK, WHITE);
 
     char ssid_line[64];
     snprintf(ssid_line, sizeof(ssid_line), "   \"%s\"", ap_ssid ? ap_ssid : "AuthorClock");
     Paint_DrawString_EN(10, 155, ssid_line, &Font20, BLACK, WHITE);
 
-    Paint_DrawString_EN(10, 210, "2. Open a browser and visit:", &Font16, BLACK, WHITE);
+    Paint_DrawString_EN(10, 210, "2. Open a browser and visit:", &Font12, BLACK, WHITE);
 
     char url_line[64];
     snprintf(url_line, sizeof(url_line), "   http://%s", ip_str ? ip_str : "192.168.4.69");
     Paint_DrawString_EN(10, 235, url_line, &Font20, BLACK, WHITE);
 
-    Paint_DrawString_EN(10, 295, "3. Fill in the form with your", &Font16, BLACK, WHITE);
-    Paint_DrawString_EN(10, 318, "   WiFi credentials and city.", &Font16, BLACK, WHITE);
+    Paint_DrawString_EN(10, 295, "3. Fill in the form with your", &Font12, BLACK, WHITE);
+    Paint_DrawString_EN(10, 318, "   WiFi credentials and city.", &Font12, BLACK, WHITE);
 
     flush_display();
 }
@@ -324,7 +358,7 @@ void display_mgr_show_error(const char *msg) {
     Paint_DrawString_EN(10, 190, "Error:", &Font24, BLACK, WHITE);
 
     if (msg) {
-        text_wrap(msg, &Font16, 10, 230, EPD_W - 20, EPD_H - 20);
+        text_wrap(msg, &Font12, 10, 230, EPD_W - 20, EPD_H - 20);
     }
 
     flush_display();
@@ -346,7 +380,8 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
     char datetime_str[80];
     format_datetime_string(datetime_str, sizeof(datetime_str), time_h, time_m, date_str,
                            use_24_hour);
-    Paint_DrawString_EN(TIME_X, TIME_Y, datetime_str, &Font20, BLACK, WHITE);
+    // Display time with Font12 (7x12 pixels)
+    Paint_DrawString_EN(TIME_X, TIME_Y, datetime_str, &Font12, BLACK, WHITE);
 
     // ── Horizontal rule below date ────────────────────────────────────────────
     Paint_DrawLine(0, HRULE_Y, EPD_W, HRULE_Y, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
@@ -366,20 +401,27 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
     }
 
     if (quote_to_display && quote_to_display->quote[0]) {
-        // Use larger font for quote and bold font for timeString
+        // Add quotation marks around quote text
+        char quoted_text[1026]; // quote[1024] + 2 quotes + null terminator
+        snprintf(quoted_text, sizeof(quoted_text), "\"%s\"", quote_to_display->quote);
+
+        // Clean up any encoding issues in the quote text
+        clean_text_encoding(quoted_text);
+
+        // Use much larger font for quote (3x bigger) and even larger font for timeString
         const char *timestring =
             (quote_to_display->timestring[0]) ? quote_to_display->timestring : NULL;
-        text_wrap_enhanced(quote_to_display->quote, timestring, &Font20, &Font24, QUOTE_X, QUOTE_Y,
-                           QUOTE_MAX_WIDTH, ATTRIB_Y - 4);
+        text_wrap_enhanced(quoted_text, timestring, &Font24, &Font24, QUOTE_X, QUOTE_Y,
+                           QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
 
-        // Attribution: (Title - Author)
+        // Attribution: Title - Author (Font20 for title/author)
         char attrib[288];
-        snprintf(attrib, sizeof(attrib), "(%s - %s)", quote_to_display->title,
+        snprintf(attrib, sizeof(attrib), "%s - %s", quote_to_display->title,
                  quote_to_display->author);
-        text_wrap(attrib, &Font16, QUOTE_X, ATTRIB_Y, QUOTE_MAX_WIDTH, EPD_H - 2);
+        text_wrap(attrib, &Font20, QUOTE_X, ATTRIB_Y, QUOTE_MAX_WIDTH, EPD_H - 2);
     } else {
         // Only show "Fetching..." if no previous quote exists
-        Paint_DrawString_EN(QUOTE_X, QUOTE_Y + 60, "Fetching quote...", &Font20, BLACK, WHITE);
+        Paint_DrawString_EN(QUOTE_X, QUOTE_Y + 60, "Fetching quote...", &Font12, BLACK, WHITE);
     }
 
     flush_display();

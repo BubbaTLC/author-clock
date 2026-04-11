@@ -33,10 +33,9 @@ typedef struct
   
 }cFONT;
 
-// Font declarations - will be defined in fonts.c
-extern sFONT Font24;
-extern sFONT Font20;
-extern sFONT Font16;
-extern sFONT Font12;
+// Font declarations - defined in separate font files
+extern sFONT Font12;  // 7x12 pixels - for time
+extern sFONT Font20;  // 14x20 pixels - for title/author  
+extern sFONT Font24;  // 17x24 pixels - for quote text
 
 #endif /* __FONTS_H */
