@@ -35,8 +35,6 @@ static uint8_t *s_image = NULL;
 static bool s_initialized = false;
 
 // ─── Quote persistence ────────────────────────────────────────────────────────
-static quote_result_t s_last_quote = {0};
-static bool s_has_last_quote = false;
 
 // ─── Helper: enhanced word-wrap with bmfont support ──────────────────────────
 // Returns the Y position immediately after the last drawn line (useful for placing
@@ -346,37 +344,22 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
     Paint_DrawLine(0, HRULE_Y, EPD_W, HRULE_Y, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
 
     // ── Quote ─────────────────────────────────────────────────────────────────
-    const quote_result_t *quote_to_display = quote;
-
-    // If no new quote provided but we have a previous one, use it
-    if (!quote || !quote->quote[0]) {
-        if (s_has_last_quote) {
-            quote_to_display = &s_last_quote;
-        }
-    } else {
-        // Save this quote as the last valid one
-        s_last_quote = *quote;
-        s_has_last_quote = true;
-    }
-
-    if (quote_to_display && quote_to_display->quote[0]) {
+    if (quote && quote->quote[0]) {
         // Add quotation marks around quote text
         char quoted_text[1026]; // quote[1024] + 2 quotes + null terminator
-        snprintf(quoted_text, sizeof(quoted_text), "\"%s\"", quote_to_display->quote);
+        snprintf(quoted_text, sizeof(quoted_text), "\"%s\"", quote->quote);
 
         // Clean up any encoding issues in the quote text
         clean_text_encoding(quoted_text);
 
-        const char *timestring =
-            (quote_to_display->timestring[0]) ? quote_to_display->timestring : NULL;
+        const char *timestring = (quote->timestring[0]) ? quote->timestring : NULL;
 
         int quote_end_y = text_wrap_bmfont(quoted_text, timestring, &font_body, &font_body_bold,
                                            QUOTE_X, QUOTE_Y, QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
 
         // Attribution: Title - Author, always 30px below the last line of the quote
         char attrib[288];
-        snprintf(attrib, sizeof(attrib), "%s - %s", quote_to_display->title,
-                 quote_to_display->author);
+        snprintf(attrib, sizeof(attrib), "%s - %s", quote->title, quote->author);
         bmfont_draw_string(QUOTE_X, quote_end_y + 30, attrib, &font_attrib, BLACK, WHITE);
     } else {
         // Show message with current time instead of "Fetching..."
