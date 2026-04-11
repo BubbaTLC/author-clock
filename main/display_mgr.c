@@ -20,12 +20,15 @@ static const char *TAG = "DISPLAY_MGR";
 #define EPD_H 480
 
 #define TIME_X 10
-#define TIME_Y 10
-#define HRULE_Y 48
+// Top bar height: must clear two font_ui lines (23+2+23=48px) plus padding → 70px
+#define HRULE_Y 70
+// Time text: one font_ui line (23px) vertically centred in [0, HRULE_Y]
+#define TIME_Y ((HRULE_Y - 23) / 2) // = 23
 
 // Weather block: right-aligned in the top bar
 #define WEATHER_ICON_X (EPD_W - 260)
-#define WEATHER_ICON_Y TIME_Y
+// Centre the 2-line text block (48px) in [0, HRULE_Y]; icon starts at same top edge
+#define WEATHER_ICON_Y ((HRULE_Y - 48) / 2) // = 11
 #define WEATHER_TEXT_X (WEATHER_ICON_X + ICON_SIZE + 6)
 #define WEATHER_MAX_X (EPD_W - 8)
 
