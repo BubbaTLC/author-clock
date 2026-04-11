@@ -9,8 +9,10 @@
  *   font_book_24  font_book_36  font_book_48
  *   font_bold_24  font_bold_36  font_bold_48
  *
+ * Current typeface: Roboto Condensed (regular + bold).
+ *
  * Regenerate any font with (from repo root):
- *   uv run tools/gen_font.py --font tools/fonts/Quicksand_Book.otf --size 36 --variant book
+ *   uv run tools/gen_font.py --font tools/fonts/Roboto-Condensed.ttf --size 36 --variant book
  * Or regenerate all six at once:
  *   tools/gen_all_fonts.sh
  */
