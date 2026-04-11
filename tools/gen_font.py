@@ -19,6 +19,7 @@ Or run all sizes at once:
 from __future__ import annotations
 
 import argparse
+import ctypes
 import sys
 from pathlib import Path
 
@@ -36,7 +37,9 @@ def clamp_u8(v: int) -> int:
     return max(0, min(255, v))
 
 
-def generate(font_path: Path, size_px: int, variant: str, output_dir: Path) -> None:
+def generate(
+    font_path: Path, size_px: int, variant: str, output_dir: Path, embolden: int = 0
+) -> None:
     face = freetype.Face(str(font_path))
     face.set_char_size(size_px * 64, 0, 72, 72)
 
@@ -45,15 +48,31 @@ def generate(font_path: Path, size_px: int, variant: str, output_dir: Path) -> N
     # ── Render every glyph in the charset ─────────────────────────────────────
     glyphs: list[dict] = []
     for cp in CHARSET:
-        face.load_char(
-            chr(cp), freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_NORMAL
-        )
+        if embolden > 0:
+            # Load outline only, embolden it, then rasterize.
+            # FT_Outline_Embolden expands the outline by `embolden` units (26.6 fixed-point)
+            # on each side. The advance is NOT updated automatically, so we add it manually.
+            face.load_char(
+                chr(cp), freetype.FT_LOAD_DEFAULT | freetype.FT_LOAD_NO_BITMAP
+            )
+            freetype.raw.FT_Outline_Embolden(
+                ctypes.byref(face.glyph.outline._FT_Outline), embolden
+            )
+            face.glyph.render(freetype.FT_RENDER_MODE_NORMAL)
+            # Each side grows by embolden/64 px; total extra advance = ceil(embolden/32)
+            extra_adv = (embolden + 31) // 32
+        else:
+            face.load_char(
+                chr(cp), freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_NORMAL
+            )
+            extra_adv = 0
+
         g = face.glyph
         bm = g.bitmap
 
         w = bm.width
         h = bm.rows
-        advance = clamp_u8(g.advance.x >> 6)
+        advance = clamp_u8((g.advance.x >> 6) + extra_adv)
         gx = clamp_i8(g.bitmap_left)
         # y offset from line-top to glyph-bitmap-top (negative = above line top)
         gy = clamp_i8(ascender_px - g.bitmap_top)
@@ -188,6 +207,17 @@ def main() -> None:
         help="Variant name written into the output filename (e.g. book, bold)",
     )
     parser.add_argument(
+        "--embolden",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "Synthetic outline emboldening strength in 1/64-pixel units "
+            "(default: 0 = off). Values 16–48 are typical; 32 ≈ +1px stroke width. "
+            "Use for thin fonts that look jaggy on e-paper."
+        ),
+    )
+    parser.add_argument(
         "--output", default="main/fonts", help="Output directory (default: main/fonts)"
     )
     args = parser.parse_args()
@@ -198,7 +228,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Generating font_{args.variant}_{args.size} from {font_path.name} ...")
-    generate(font_path, args.size, args.variant, Path(args.output))
+    generate(font_path, args.size, args.variant, Path(args.output), args.embolden)
 
 
 if __name__ == "__main__":
