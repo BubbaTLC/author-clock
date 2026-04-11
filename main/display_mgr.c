@@ -430,7 +430,7 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
         }
 
         snprintf(no_quote_msg, sizeof(no_quote_msg),
-                 "Hmm, looks like this time doesn't have a quote, but it is %s.", time_str);
+                 "Oh no looks like this time doesn't have a quote, but it is %s.", time_str);
 
         text_wrap_bmfont(no_quote_msg, time_str, &font_body, &font_body_bold, QUOTE_X, QUOTE_Y,
                          QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
