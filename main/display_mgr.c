@@ -117,8 +117,14 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
 
         // Calculate how much text fits, measuring bold sections with bold_font
         while (p[len]) {
-            if (p[len] == ' ')
-                last_space = len;
+            if (p[len] == ' ') {
+                // Don't use spaces inside the timestring as break points — the
+                // timestring must stay on a single line so it renders fully bold.
+                bool in_ts = timestring_pos && ts_len > 0 && (p + len) >= timestring_pos &&
+                             (p + len) < (timestring_pos + ts_len);
+                if (!in_ts)
+                    last_space = len;
+            }
             if (p[len] == '\n') {
                 last_space = len;
                 break;
