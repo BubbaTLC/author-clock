@@ -380,10 +380,10 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
         bmfont_draw_string(QUOTE_X, quote_end_y + 30, attrib, &font_attrib, BLACK, WHITE);
     } else {
         // Show message with current time instead of "Fetching..."
-        char no_quote_msg[80];
+        char no_quote_msg[96];
         if (use_24_hour) {
             snprintf(no_quote_msg, sizeof(no_quote_msg),
-                     "Hmm looks like this time doesn't have a quote, but it is %02d:%02d", time_h,
+                     "Hmm, looks like this time doesn't have a quote, but it is %02d:%02d.", time_h,
                      time_m);
         } else {
             // Convert to 12-hour format
@@ -398,10 +398,11 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
                 ampm = "PM";
             }
             snprintf(no_quote_msg, sizeof(no_quote_msg),
-                     "Hmm looks like this time doesn't have a quote, but it is %d:%02d %s",
+                     "Hmm, looks like this time doesn't have a quote, but it is %d:%02d %s.",
                      display_hour, time_m, ampm);
         }
-        bmfont_draw_string(QUOTE_X, QUOTE_Y + 60, no_quote_msg, &font_body, BLACK, WHITE);
+        text_wrap_bmfont(no_quote_msg, NULL, &font_body, NULL, QUOTE_X, QUOTE_Y, QUOTE_MAX_WIDTH,
+                         QUOTE_MAX_Y);
     }
 
     flush_display();
