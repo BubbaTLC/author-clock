@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include "esp_err.h"
-#include "quote_fetcher.h" // reuse quote_result_t
+#include "quote_types.h"
 
 /**
  * @brief Initialize the on-device quote reader.

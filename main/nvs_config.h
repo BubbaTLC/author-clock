@@ -7,7 +7,7 @@
 
 /**
  * NVS Configuration Module
- * Handles persistent storage of WiFi credentials and location settings
+ * Handles persistent storage of WiFi credentials, location, and display settings.
  * Uses NVS namespace "clock_cfg"
  */
 
@@ -15,6 +15,19 @@
 #define MAX_SSID_LEN 32
 #define MAX_PASS_LEN 64
 #define MAX_CITY_LEN 63
+
+/** Date/time display mode for the top-left corner of the display */
+typedef enum {
+    DATE_MODE_OFF = 0,       /**< Nothing shown in the top-left corner */
+    DATE_MODE_DATE_ONLY = 1, /**< Show date string only (e.g. "Tuesday, April 9") */
+    DATE_MODE_DATE_TIME = 2, /**< Show date + time (e.g. "Tuesday, April 9, 9:05 AM") */
+} date_display_mode_t;
+
+/** Temperature unit for weather display */
+typedef enum {
+    TEMP_UNIT_CELSIUS = 0,
+    TEMP_UNIT_FAHRENHEIT = 1,
+} temp_unit_t;
 
 /**
  * Initialize the NVS configuration system
@@ -74,6 +87,48 @@ esp_err_t nvs_config_save_time_format(bool use_24_hour);
  * @return ESP_OK on success, ESP_ERR_NVS_NOT_FOUND if no preference stored (defaults to 24-hour)
  */
 esp_err_t nvs_config_load_time_format(bool *use_24_hour);
+
+/**
+ * Save date display mode to NVS
+ * @param mode DATE_MODE_OFF, DATE_MODE_DATE_ONLY, or DATE_MODE_DATE_TIME
+ * @return ESP_OK on success
+ */
+esp_err_t nvs_config_save_date_mode(date_display_mode_t mode);
+
+/**
+ * Load date display mode from NVS
+ * @param mode Pointer to store the date display mode (defaults to DATE_MODE_DATE_TIME)
+ * @return ESP_OK on success
+ */
+esp_err_t nvs_config_load_date_mode(date_display_mode_t *mode);
+
+/**
+ * Save weather display preference to NVS
+ * @param enabled true to show weather in top-right corner
+ * @return ESP_OK on success
+ */
+esp_err_t nvs_config_save_weather_enabled(bool enabled);
+
+/**
+ * Load weather display preference from NVS
+ * @param enabled Pointer to store preference (defaults to true)
+ * @return ESP_OK on success
+ */
+esp_err_t nvs_config_load_weather_enabled(bool *enabled);
+
+/**
+ * Save temperature unit preference to NVS
+ * @param unit TEMP_UNIT_CELSIUS or TEMP_UNIT_FAHRENHEIT
+ * @return ESP_OK on success
+ */
+esp_err_t nvs_config_save_temp_unit(temp_unit_t unit);
+
+/**
+ * Load temperature unit preference from NVS
+ * @param unit Pointer to store preference (defaults to TEMP_UNIT_FAHRENHEIT)
+ * @return ESP_OK on success
+ */
+esp_err_t nvs_config_load_temp_unit(temp_unit_t *unit);
 
 /**
  * Clear all stored configuration data

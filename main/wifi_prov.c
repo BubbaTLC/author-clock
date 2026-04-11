@@ -58,7 +58,7 @@ static const char *enhanced_config_html_template =
     "WiFi: Connected to %s (Signal: %d dBm)<br>"
     "Location: %s<br>"
     "Timezone: UTC%+d<br>"
-    "Time Format: %s<br>"
+    "Time Format: %s | Date: %s | Weather: %s | Temp: %s<br>"
     "Access URL: <a href='http://authorclock.local'>authorclock.local</a>"
     "</div>"
     "</div>"
@@ -76,17 +76,35 @@ static const char *enhanced_config_html_template =
     "<div class='current-value'>Current: UTC%+d</div>"
     "<label for='timezone'>Timezone Offset (hours from UTC):</label>"
     "<select id='timezone' name='timezone'>"
-    "%s" // Timezone options will be inserted here
+    "%s" // Timezone options
     "</select>"
     "</div>"
     "<div class='form-group'>"
     "<div class='current-value'>Current: %s</div>"
     "<label for='timeformat'>Time Format:</label>"
     "<select id='timeformat' name='timeformat'>"
-    "%s" // Time format options will be inserted here
+    "%s" // Time format options
     "</select>"
     "</div>"
-    "<button type='submit' class='btn btn-primary'>Update Location & Time</button>"
+    "<div class='form-group'>"
+    "<label for='datemode'>Date Display (top-left corner):</label>"
+    "<select id='datemode' name='datemode'>"
+    "%s" // Date mode options
+    "</select>"
+    "</div>"
+    "<div class='form-group'>"
+    "<label for='weather_on'>Weather Display (top-right corner):</label>"
+    "<select id='weather_on' name='weather_on'>"
+    "%s" // Weather on options
+    "</select>"
+    "</div>"
+    "<div class='form-group'>"
+    "<label for='tempunit'>Temperature Unit:</label>"
+    "<select id='tempunit' name='tempunit'>"
+    "%s" // Temp unit options
+    "</select>"
+    "</div>"
+    "<button type='submit' class='btn btn-primary'>Update Settings</button>"
     "</form>"
     "</div>"
 
@@ -140,6 +158,37 @@ static const char *generate_timeformat_options(bool current_24h) {
              "<option value='1'%s>24-hour (15:30)</option>"
              "<option value='0'%s>12-hour (3:30 PM)</option>",
              current_24h ? " selected" : "", current_24h ? "" : " selected");
+    return options;
+}
+
+static const char *generate_datemode_options(date_display_mode_t current_mode) {
+    static char options[384];
+    snprintf(options, sizeof(options),
+             "<option value='2'%s>Date and Time</option>"
+             "<option value='1'%s>Date Only</option>"
+             "<option value='0'%s>Off</option>",
+             (current_mode == DATE_MODE_DATE_TIME) ? " selected" : "",
+             (current_mode == DATE_MODE_DATE_ONLY) ? " selected" : "",
+             (current_mode == DATE_MODE_OFF) ? " selected" : "");
+    return options;
+}
+
+static const char *generate_weatheron_options(bool current_on) {
+    static char options[256];
+    snprintf(options, sizeof(options),
+             "<option value='1'%s>Show Weather</option>"
+             "<option value='0'%s>Hide Weather</option>",
+             current_on ? " selected" : "", current_on ? "" : " selected");
+    return options;
+}
+
+static const char *generate_tempunit_options(temp_unit_t current_unit) {
+    static char options[256];
+    snprintf(options, sizeof(options),
+             "<option value='1'%s>Fahrenheit (&deg;F)</option>"
+             "<option value='0'%s>Celsius (&deg;C)</option>",
+             (current_unit == TEMP_UNIT_FAHRENHEIT) ? " selected" : "",
+             (current_unit == TEMP_UNIT_FAHRENHEIT) ? "" : " selected");
     return options;
 }
 
@@ -237,10 +286,11 @@ static bool parse_form_data(const char *data, char *ssid, char *password, char *
     return ssid_found && pass_found && city_found && tz_found;
 }
 
-// Parse location form data (city and timezone only)
+// Parse location form data (city, timezone, time format, date mode, weather, temp unit)
 static bool parse_location_form_data(const char *data, char *city, int8_t *timezone,
-                                     bool *use_24_hour) {
-    if (!data || !city || !timezone || !use_24_hour)
+                                     bool *use_24_hour, date_display_mode_t *date_mode,
+                                     bool *weather_on, temp_unit_t *temp_unit) {
+    if (!data || !city || !timezone || !use_24_hour || !date_mode || !weather_on || !temp_unit)
         return false;
 
     char *data_copy = strdup(data);
@@ -267,9 +317,16 @@ static bool parse_location_form_data(const char *data, char *city, int8_t *timez
                     tz_found = true;
                 }
             } else if (strcmp(key, "timeformat") == 0) {
-                int tf_int = atoi(value);
-                *use_24_hour = (tf_int != 0);
+                *use_24_hour = (atoi(value) != 0);
                 tf_found = true;
+            } else if (strcmp(key, "datemode") == 0) {
+                int v = atoi(value);
+                if (v >= 0 && v <= 2)
+                    *date_mode = (date_display_mode_t)v;
+            } else if (strcmp(key, "weather_on") == 0) {
+                *weather_on = (atoi(value) != 0);
+            } else if (strcmp(key, "tempunit") == 0) {
+                *temp_unit = (atoi(value) != 0) ? TEMP_UNIT_FAHRENHEIT : TEMP_UNIT_CELSIUS;
             }
         }
         token = strtok(NULL, "&");
@@ -422,18 +479,21 @@ cleanup:
 
 // HTTP handler for GET / - Enhanced configuration interface
 static esp_err_t enhanced_config_get_handler(httpd_req_t *req) {
-    // Get current WiFi information
     char current_ssid[33] = "Not connected";
     char current_city[64] = "Not set";
     int8_t current_tz = 0;
     bool current_24h = true;
+    date_display_mode_t current_date_mode = DATE_MODE_DATE_TIME;
+    bool current_weather_on = true;
+    temp_unit_t current_temp_unit = TEMP_UNIT_FAHRENHEIT;
     int rssi = 0;
 
-    // Load current settings from NVS
     nvs_config_load_location(current_city, &current_tz);
-    nvs_config_load_time_format(&current_24h); // Ignore errors, use default
+    nvs_config_load_time_format(&current_24h);
+    nvs_config_load_date_mode(&current_date_mode);
+    nvs_config_load_weather_enabled(&current_weather_on);
+    nvs_config_load_temp_unit(&current_temp_unit);
 
-    // Get WiFi status
     wifi_ap_record_t ap_info;
     esp_err_t ret = esp_wifi_sta_get_ap_info(&ap_info);
     if (ret == ESP_OK) {
@@ -441,25 +501,31 @@ static esp_err_t enhanced_config_get_handler(httpd_req_t *req) {
         rssi = ap_info.rssi;
     }
 
-    // Generate timezone and time format options with current selections
     const char *timezone_options = generate_timezone_options(current_tz);
     const char *timeformat_options = generate_timeformat_options(current_24h);
+    const char *datemode_options = generate_datemode_options(current_date_mode);
+    const char *weatheron_options = generate_weatheron_options(current_weather_on);
+    const char *tempunit_options = generate_tempunit_options(current_temp_unit);
 
-    // Create the complete HTML response
-    char *html_response = malloc(8192);
+    const char *date_mode_label = (current_date_mode == DATE_MODE_DATE_TIME)   ? "Date and Time"
+                                  : (current_date_mode == DATE_MODE_DATE_ONLY) ? "Date Only"
+                                                                               : "Off";
+
+    char *html_response = malloc(10240);
     if (!html_response) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
         return ESP_FAIL;
     }
 
-    snprintf(html_response, 8192, enhanced_config_html_template, current_ssid, rssi, current_city,
-             current_tz,                             // Status section
-             current_24h ? "24-hour" : "12-hour",    // Time format status
-             current_city, current_city, current_tz, // Location form
-             timezone_options,                       // Timezone options
-             current_24h ? "24-hour" : "12-hour",    // Time format current value
-             timeformat_options                      // Time format options
-    );
+    snprintf(html_response, 10240, enhanced_config_html_template,
+             // Status section
+             current_ssid, rssi, current_city, current_tz, current_24h ? "24-hour" : "12-hour",
+             date_mode_label, current_weather_on ? "On" : "Off",
+             current_temp_unit == TEMP_UNIT_FAHRENHEIT ? "°F" : "°C",
+             // Location form
+             current_city, current_city, current_tz, timezone_options,
+             current_24h ? "24-hour" : "12-hour", timeformat_options, datemode_options,
+             weatheron_options, tempunit_options);
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html_response, HTTPD_RESP_USE_STRLEN);
@@ -468,9 +534,9 @@ static esp_err_t enhanced_config_get_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// HTTP handler for POST /location - Update location and timezone only
+// HTTP handler for POST /location - Update location, timezone, and display settings
 static esp_err_t location_post_handler(httpd_req_t *req) {
-    char content[256];
+    char content[384];
     size_t recv_size =
         (req->content_len < sizeof(content) - 1) ? req->content_len : sizeof(content) - 1;
     int ret = httpd_req_recv(req, content, recv_size);
@@ -486,20 +552,21 @@ static esp_err_t location_post_handler(httpd_req_t *req) {
     char city[MAX_CITY_LEN + 1] = {0};
     int8_t timezone = 0;
     bool use_24_hour = true;
+    date_display_mode_t date_mode = DATE_MODE_DATE_TIME;
+    bool weather_on = true;
+    temp_unit_t temp_unit = TEMP_UNIT_FAHRENHEIT;
 
-    // Parse city, timezone, and time format from form data
-    if (!parse_location_form_data(content, city, &timezone, &use_24_hour)) {
+    if (!parse_location_form_data(content, city, &timezone, &use_24_hour, &date_mode, &weather_on,
+                                  &temp_unit)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form data");
         return ESP_FAIL;
     }
 
-    // Validate inputs
     if (strlen(city) == 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "City cannot be empty");
         return ESP_FAIL;
     }
 
-    // Save location to NVS
     esp_err_t err = nvs_config_save_location(city, timezone);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save location config: %s", esp_err_to_name(err));
@@ -507,15 +574,15 @@ static esp_err_t location_post_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // Save time format to NVS
-    err = nvs_config_save_time_format(use_24_hour);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save time format config: %s", esp_err_to_name(err));
-        // Don't fail the request for time format errors, just log
-    }
+    nvs_config_save_time_format(use_24_hour);
+    nvs_config_save_date_mode(date_mode);
+    nvs_config_save_weather_enabled(weather_on);
+    nvs_config_save_temp_unit(temp_unit);
 
-    ESP_LOGI(TAG, "Location updated - City: '%s', TZ: UTC%+d, Format: %s", city, timezone,
-             use_24_hour ? "24-hour" : "12-hour");
+    ESP_LOGI(TAG,
+             "Settings updated — City: '%s', TZ: UTC%+d, Fmt: %s, Date: %d, Weather: %s, Temp: %s",
+             city, timezone, use_24_hour ? "24h" : "12h", (int)date_mode, weather_on ? "on" : "off",
+             temp_unit == TEMP_UNIT_FAHRENHEIT ? "F" : "C");
 
     // Send success response and redirect
     const char *success_response = "<!DOCTYPE html><html><head>"

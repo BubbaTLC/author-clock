@@ -11,6 +11,7 @@
 #include "GUI_Paint.h"
 #include "bmfont_renderer.h"
 #include "fonts/font_select.h"
+#include "weather_icons.h"
 
 static const char *TAG = "DISPLAY_MGR";
 
@@ -20,21 +21,22 @@ static const char *TAG = "DISPLAY_MGR";
 
 #define TIME_X 10
 #define TIME_Y 10
-#define DATE_X 10
-#define DATE_Y 50
-#define HRULE_Y 45
-#define QUOTE_X 20          // Reduce left margin to give more space
-#define QUOTE_Y 80          // Start higher to leave room for larger text
-#define QUOTE_MAX_WIDTH 760 // Use more of the screen width
-#define QUOTE_MAX_Y 360     // Max Y for quote text (leaves room for attribution below)
+#define HRULE_Y 48
+
+// Weather block: right-aligned in the top bar
+#define WEATHER_ICON_X (EPD_W - 260)
+#define WEATHER_ICON_Y TIME_Y
+#define WEATHER_TEXT_X (WEATHER_ICON_X + ICON_SIZE + 6)
+#define WEATHER_MAX_X (EPD_W - 8)
+
+// Quote area
+#define QUOTE_X 20
+#define QUOTE_MAX_WIDTH 760
 
 // ─── Image buffer ─────────────────────────────────────────────────────────────
-// 1 bit per pixel → (800 * 480) / 8 = 48000 bytes
 #define IMAGE_SIZE (EPD_W * EPD_H / 8)
 static uint8_t *s_image = NULL;
 static bool s_initialized = false;
-
-// ─── Quote persistence ────────────────────────────────────────────────────────
 
 // ─── Helper: enhanced word-wrap with bmfont support ──────────────────────────
 // Returns the Y position immediately after the last drawn line (useful for placing
@@ -92,7 +94,7 @@ static uint16_t mixed_string_width(const char *p, int len, const bmfont_t *font,
 
 static int text_wrap_bmfont(const char *text, const char *timestring, const bmfont_t *font,
                             const bmfont_t *bold_font, uint16_t x, uint16_t y, uint16_t max_width,
-                            uint16_t max_y) {
+                            uint16_t max_y, bool dry_run) {
     if (!text || !font)
         return 0;
 
@@ -153,42 +155,40 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
         memcpy(line_buf, p, copy);
         line_buf[copy] = '\0';
 
-        // Check if this line contains the timestring
-        bool has_timestring = timestring_pos && (timestring_pos >= p) && (timestring_pos < p + len);
+        if (!dry_run) {
+            // Check if this line contains the timestring
+            bool has_timestring =
+                timestring_pos && (timestring_pos >= p) && (timestring_pos < p + len);
 
-        if (has_timestring && bold_font && timestring) {
-            // Split line at timestring for special formatting
-            int prefix_len = timestring_pos - p;
-            int timestring_len = strlen(timestring);
+            if (has_timestring && bold_font && timestring) {
+                int prefix_len = timestring_pos - p;
+                int timestring_len = strlen(timestring);
 
-            uint16_t cur_x = x;
+                uint16_t cur_x = x;
 
-            // Draw text before timestring
-            if (prefix_len > 0) {
-                char prefix[128];
-                int prefix_copy = prefix_len < 127 ? prefix_len : 127;
-                memcpy(prefix, p, prefix_copy);
-                prefix[prefix_copy] = '\0';
-                cur_x += bmfont_draw_string(cur_x, cur_y, prefix, font, BLACK, WHITE);
-            }
-
-            // Draw timestring in bold font
-            cur_x += bmfont_draw_string(cur_x, cur_y, timestring, bold_font, BLACK, WHITE);
-
-            // Draw text after timestring
-            const char *suffix = timestring_pos + timestring_len;
-            if (suffix < p + len) {
-                int suffix_len = (p + len) - suffix;
-                if (suffix_len > 0 && suffix_len < 128) {
-                    char suffix_buf[128];
-                    memcpy(suffix_buf, suffix, suffix_len);
-                    suffix_buf[suffix_len] = '\0';
-                    bmfont_draw_string(cur_x, cur_y, suffix_buf, font, BLACK, WHITE);
+                if (prefix_len > 0) {
+                    char prefix[128];
+                    int prefix_copy = prefix_len < 127 ? prefix_len : 127;
+                    memcpy(prefix, p, prefix_copy);
+                    prefix[prefix_copy] = '\0';
+                    cur_x += bmfont_draw_string(cur_x, cur_y, prefix, font, BLACK, WHITE);
                 }
+
+                cur_x += bmfont_draw_string(cur_x, cur_y, timestring, bold_font, BLACK, WHITE);
+
+                const char *suffix = timestring_pos + timestring_len;
+                if (suffix < p + len) {
+                    int suffix_len = (p + len) - suffix;
+                    if (suffix_len > 0 && suffix_len < 128) {
+                        char suffix_buf[128];
+                        memcpy(suffix_buf, suffix, suffix_len);
+                        suffix_buf[suffix_len] = '\0';
+                        bmfont_draw_string(cur_x, cur_y, suffix_buf, font, BLACK, WHITE);
+                    }
+                }
+            } else {
+                bmfont_draw_string(x, cur_y, line_buf, font, BLACK, WHITE);
             }
-        } else {
-            // Regular text drawing
-            bmfont_draw_string(x, cur_y, line_buf, font, BLACK, WHITE);
         }
 
         // Advance past the line content and optional space/newline
@@ -368,57 +368,111 @@ void display_mgr_show_error(const char *msg) {
     bmfont_draw_string(10, 190, "Error:", &font_ui, BLACK, WHITE);
 
     if (msg) {
-        text_wrap_bmfont(msg, NULL, &font_ui, NULL, 10, 230, EPD_W - 20, EPD_H - 20);
+        text_wrap_bmfont(msg, NULL, &font_ui, NULL, 10, 230, EPD_W - 20, EPD_H - 20, false);
     }
 
     flush_display();
 }
 
 void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
-                        const quote_result_t *quote) {
+                        const quote_result_t *quote, const weather_data_t *weather) {
     if (!s_initialized)
         return;
     ESP_LOGI(TAG, "Updating display: %02d:%02d", time_h, time_m);
 
     Paint_Clear(WHITE);
 
-    // Load time format preference from NVS
-    bool use_24_hour = true;                   // default
-    nvs_config_load_time_format(&use_24_hour); // ignore errors, use default
+    // ── Load display preferences ──────────────────────────────────────────────
+    bool use_24_hour = true;
+    date_display_mode_t date_mode = DATE_MODE_DATE_TIME;
+    bool weather_enabled = true;
+    temp_unit_t temp_unit = TEMP_UNIT_FAHRENHEIT;
 
-    // ── Combined Date/Time ────────────────────────────────────────────────────
-    char datetime_str[80];
-    format_datetime_string(datetime_str, sizeof(datetime_str), time_h, time_m, date_str,
-                           use_24_hour);
-    bmfont_draw_string(TIME_X, TIME_Y, datetime_str, &font_ui, BLACK, WHITE);
+    nvs_config_load_time_format(&use_24_hour);
+    nvs_config_load_date_mode(&date_mode);
+    nvs_config_load_weather_enabled(&weather_enabled);
+    nvs_config_load_temp_unit(&temp_unit);
 
-    // ── Horizontal rule below date ────────────────────────────────────────────
-    Paint_DrawLine(0, HRULE_Y, EPD_W, HRULE_Y, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    // Suppress weather block if data isn't available yet
+    bool show_weather = weather_enabled && weather && weather->valid;
+    bool top_bar_visible = (date_mode != DATE_MODE_OFF) || show_weather;
 
-    // ── Quote ─────────────────────────────────────────────────────────────────
-    if (quote && quote->quote[0]) {
-        // Add quotation marks around quote text
-        char quoted_text[1026]; // quote[1024] + 2 quotes + null terminator
+    // ── Top bar ───────────────────────────────────────────────────────────────
+    if (top_bar_visible) {
+        // Date / time in top-left
+        if (date_mode == DATE_MODE_DATE_ONLY) {
+            bmfont_draw_string(TIME_X, TIME_Y, date_str ? date_str : "--", &font_ui, BLACK, WHITE);
+        } else if (date_mode == DATE_MODE_DATE_TIME) {
+            char datetime_str[80];
+            format_datetime_string(datetime_str, sizeof(datetime_str), time_h, time_m, date_str,
+                                   use_24_hour);
+            bmfont_draw_string(TIME_X, TIME_Y, datetime_str, &font_ui, BLACK, WHITE);
+        }
+
+        // Weather in top-right
+        if (show_weather) {
+            // Draw icon
+            weather_icon_draw(WEATHER_ICON_X, WEATHER_ICON_Y, weather->weather_id);
+
+            // Temperature string
+            char temp_str[16];
+            if (temp_unit == TEMP_UNIT_FAHRENHEIT) {
+                int temp_f = (int)((weather->temp_c * 9.0f / 5.0f) + 32.0f + 0.5f);
+                snprintf(temp_str, sizeof(temp_str),
+                         "%d\xb0"
+                         "F",
+                         temp_f);
+            } else {
+                int temp_c = (int)(weather->temp_c + 0.5f);
+                snprintf(temp_str, sizeof(temp_str),
+                         "%d\xb0"
+                         "C",
+                         temp_c);
+            }
+
+            // Draw temp on first line of weather block
+            bmfont_draw_string(WEATHER_TEXT_X, WEATHER_ICON_Y, temp_str, &font_ui, BLACK, WHITE);
+
+            // Draw condition on second line (capped at available width)
+            uint16_t text_line2_y = WEATHER_ICON_Y + bmfont_height(&font_ui) + 2;
+            if (text_line2_y < HRULE_Y - 2) {
+                char cond_buf[48];
+                strlcpy(cond_buf, weather->condition, sizeof(cond_buf));
+                // Truncate if too wide
+                while (strlen(cond_buf) > 0 &&
+                       bmfont_string_width(cond_buf, &font_ui) > (WEATHER_MAX_X - WEATHER_TEXT_X)) {
+                    cond_buf[strlen(cond_buf) - 1] = '\0';
+                }
+                bmfont_draw_string(WEATHER_TEXT_X, text_line2_y, cond_buf, &font_ui, BLACK, WHITE);
+            }
+        }
+
+        // Horizontal rule
+        Paint_DrawLine(0, HRULE_Y, EPD_W, HRULE_Y, BLACK, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    }
+
+    // ── Vertical centering for quote ──────────────────────────────────────────
+    uint16_t quote_area_top = top_bar_visible ? (HRULE_Y + 10) : 0;
+    uint16_t attrib_h = bmfont_height(&font_attrib);
+    uint16_t body_h = bmfont_height(&font_body);
+    // Reserve bottom margin for attribution (height + 30px gap + 10px padding)
+    uint16_t attrib_total = attrib_h + 40;
+    uint16_t available_h = EPD_H - quote_area_top - attrib_total;
+
+    // Build the text for measurement
+    char quoted_text[1026];
+    char no_quote_msg[96];
+    char time_str[16];
+    const char *display_text = NULL;
+    const char *display_ts = NULL;
+    bool has_quote = (quote && quote->quote[0]);
+
+    if (has_quote) {
         snprintf(quoted_text, sizeof(quoted_text), "\"%s\"", quote->quote);
-
-        // Clean up any encoding issues in the quote text
         clean_text_encoding(quoted_text);
-
-        const char *timestring = (quote->timestring[0]) ? quote->timestring : NULL;
-
-        int quote_end_y = text_wrap_bmfont(quoted_text, timestring, &font_body, &font_body_bold,
-                                           QUOTE_X, QUOTE_Y, QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
-
-        // Attribution: Title - Author, always 30px below the last line of the quote
-        char attrib[288];
-        snprintf(attrib, sizeof(attrib), "%s - %s", quote->title, quote->author);
-        bmfont_draw_string(QUOTE_X, quote_end_y + 30, attrib, &font_attrib, BLACK, WHITE);
+        display_text = quoted_text;
+        display_ts = (quote->timestring[0]) ? quote->timestring : NULL;
     } else {
-        // Show message with current time. Format the time part separately so it
-        // can be passed as the timestring and rendered in bold.
-        char time_str[16];
-        char no_quote_msg[96];
-
         if (use_24_hour) {
             snprintf(time_str, sizeof(time_str), "%02d:%02d", time_h, time_m);
         } else {
@@ -434,12 +488,37 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
             }
             snprintf(time_str, sizeof(time_str), "%d:%02d %s", display_hour, time_m, ampm);
         }
-
         snprintf(no_quote_msg, sizeof(no_quote_msg),
                  "Oh no looks like this time doesn't have a quote, but it is %s.", time_str);
+        display_text = no_quote_msg;
+        display_ts = time_str;
+    }
 
-        text_wrap_bmfont(no_quote_msg, time_str, &font_body, &font_body_bold, QUOTE_X, QUOTE_Y,
-                         QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
+    // Dry-run to measure quote block height
+    // Use a large max_y so the full text is measured regardless of display limits
+    int measured_end_y = text_wrap_bmfont(display_text, display_ts, &font_body, &font_body_bold,
+                                          QUOTE_X, 0, QUOTE_MAX_WIDTH, EPD_H, true);
+    uint16_t quote_block_h = (uint16_t)(measured_end_y > 0 ? measured_end_y : body_h);
+
+    // Center the quote block in the available area (clamp to avoid overlap with top bar)
+    uint16_t quote_y = quote_area_top;
+    if (available_h > quote_block_h) {
+        quote_y = quote_area_top + (available_h - quote_block_h) / 2;
+    }
+
+    // ── Quote ─────────────────────────────────────────────────────────────────
+    uint16_t quote_max_y = EPD_H - attrib_total;
+    int quote_end_y = text_wrap_bmfont(display_text, display_ts, &font_body, &font_body_bold,
+                                       QUOTE_X, quote_y, QUOTE_MAX_WIDTH, quote_max_y, false);
+
+    // ── Attribution ───────────────────────────────────────────────────────────
+    if (has_quote) {
+        char attrib[288];
+        snprintf(attrib, sizeof(attrib), "%s - %s", quote->title, quote->author);
+        int attrib_y = quote_end_y + 30;
+        if (attrib_y > (int)(EPD_H - attrib_h - 4))
+            attrib_y = EPD_H - attrib_h - 4;
+        bmfont_draw_string(QUOTE_X, (uint16_t)attrib_y, attrib, &font_attrib, BLACK, WHITE);
     }
 
     flush_display();

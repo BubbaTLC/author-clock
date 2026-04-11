@@ -13,6 +13,7 @@
 #include "wifi_sta.h"
 #include "ntp_sync.h"
 #include "quote_reader.h"
+#include "weather_fetcher.h"
 #include "display_mgr.h"
 #include "app_config.h"
 
@@ -34,6 +35,7 @@ static app_state_t s_state = STATE_BOOT;
 static SemaphoreHandle_t s_mutex;
 static quote_result_t s_quote;
 static bool s_quote_valid = false;
+static weather_data_t s_weather = {0};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 static const char *weekday_names[] = {"Sunday",   "Monday", "Tuesday", "Wednesday",
@@ -94,12 +96,39 @@ static void clock_task(void *arg) {
             xSemaphoreTake(s_mutex, portMAX_DELAY);
             quote_result_t q_copy = s_quote;
             bool q_valid = s_quote_valid;
+            weather_data_t w_copy = s_weather;
             xSemaphoreGive(s_mutex);
 
-            display_mgr_update(hour, min, date_str, q_valid ? &q_copy : NULL);
+            display_mgr_update(hour, min, date_str, q_valid ? &q_copy : NULL,
+                               w_copy.valid ? &w_copy : NULL);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+static void weather_task(void *arg) {
+    (void)arg;
+    char city[MAX_CITY_LEN + 1] = {0};
+    int8_t tz = 0;
+
+    while (1) {
+        nvs_config_load_location(city, &tz);
+        if (city[0] != '\0') {
+            weather_data_t w = {0};
+            esp_err_t ret = weather_fetch(city, &w);
+            if (ret == ESP_OK) {
+                xSemaphoreTake(s_mutex, portMAX_DELAY);
+                s_weather = w;
+                xSemaphoreGive(s_mutex);
+                ESP_LOGI(TAG, "Weather updated: %.1f°C, %s", w.temp_c, w.condition);
+            } else {
+                ESP_LOGW(TAG, "Weather fetch failed: %s", esp_err_to_name(ret));
+            }
+        } else {
+            ESP_LOGW(TAG, "No city configured — skipping weather fetch");
+        }
+        vTaskDelay(pdMS_TO_TICKS(WEATHER_UPDATE_INTERVAL_S * 1000));
     }
 }
 
@@ -209,12 +238,12 @@ void app_main(void) {
         case STATE_RUNNING: {
             ESP_LOGI(TAG, "Entering RUNNING state");
 
-            // Show initial display before tasks start
+            // Show initial display before tasks start (no weather yet)
             char date_str[48];
             build_date_string(date_str, sizeof(date_str));
             uint8_t h = 0, m = 0;
             ntp_get_current_time(&h, &m, NULL, NULL, NULL, NULL, NULL);
-            display_mgr_update(h, m, date_str, NULL);
+            display_mgr_update(h, m, date_str, NULL, NULL);
 
             // Start persistent configuration server on STA interface
             ESP_LOGI(TAG, "Starting configuration web server");
@@ -223,7 +252,6 @@ void app_main(void) {
                 ESP_LOGW(TAG, "Failed to start config server: %s", esp_err_to_name(config_ret));
                 ESP_LOGW(TAG, "Continuing without config server");
             } else {
-                // Get the STA IP address for user reference
                 esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
                 esp_netif_ip_info_t ip_info;
                 if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
@@ -235,6 +263,9 @@ void app_main(void) {
                     ESP_LOGI(TAG, "Configuration server started (check device IP for access)");
                 }
             }
+
+            // Start weather task — fetches immediately then every 30 min
+            xTaskCreate(weather_task, "weather_task", WEATHER_TASK_STACK_SIZE, NULL, 4, NULL);
 
             // Start clock task — drives quote refresh every minute.
             // Pass 'm' so the task skips the minute we just displayed and

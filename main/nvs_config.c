@@ -13,6 +13,9 @@ static const char *KEY_PASS = "pass";
 static const char *KEY_CITY = "city";
 static const char *KEY_TZ_OFF = "tz_off";
 static const char *KEY_TIME_FMT = "time_fmt";
+static const char *KEY_DATE_MODE = "date_mode";
+static const char *KEY_WEATHER_ON = "weather_on";
+static const char *KEY_TEMP_UNIT = "temp_unit";
 
 static nvs_handle_t nvs_handle_config = 0;
 static bool nvs_initialized = false;
@@ -332,5 +335,149 @@ esp_err_t nvs_config_load_time_format(bool *use_24_hour) {
 
     *use_24_hour = (format_val != 0);
     ESP_LOGI(TAG, "Time format loaded: %s", *use_24_hour ? "24-hour" : "12-hour");
+    return ESP_OK;
+}
+
+esp_err_t nvs_config_save_date_mode(date_display_mode_t mode) {
+    if (!nvs_initialized) {
+        ESP_LOGE(TAG, "NVS not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = nvs_set_u8(nvs_handle_config, KEY_DATE_MODE, (uint8_t)mode);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save date mode: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = nvs_commit(nvs_handle_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit date mode: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Date mode saved: %d", (int)mode);
+    return ESP_OK;
+}
+
+esp_err_t nvs_config_load_date_mode(date_display_mode_t *mode) {
+    if (!nvs_initialized) {
+        ESP_LOGE(TAG, "NVS not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!mode) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t val;
+    esp_err_t ret = nvs_get_u8(nvs_handle_config, KEY_DATE_MODE, &val);
+    if (ret != ESP_OK) {
+        if (ret == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGD(TAG, "No date mode stored, defaulting to DATE_MODE_DATE_TIME");
+            *mode = DATE_MODE_DATE_TIME;
+        } else {
+            ESP_LOGE(TAG, "Failed to load date mode: %s", esp_err_to_name(ret));
+        }
+        return ret;
+    }
+
+    *mode = (date_display_mode_t)val;
+    ESP_LOGI(TAG, "Date mode loaded: %d", (int)*mode);
+    return ESP_OK;
+}
+
+esp_err_t nvs_config_save_weather_enabled(bool enabled) {
+    if (!nvs_initialized) {
+        ESP_LOGE(TAG, "NVS not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = nvs_set_u8(nvs_handle_config, KEY_WEATHER_ON, enabled ? 1 : 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save weather_on: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = nvs_commit(nvs_handle_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit weather_on: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Weather enabled saved: %s", enabled ? "on" : "off");
+    return ESP_OK;
+}
+
+esp_err_t nvs_config_load_weather_enabled(bool *enabled) {
+    if (!nvs_initialized) {
+        ESP_LOGE(TAG, "NVS not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!enabled) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t val;
+    esp_err_t ret = nvs_get_u8(nvs_handle_config, KEY_WEATHER_ON, &val);
+    if (ret != ESP_OK) {
+        if (ret == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGD(TAG, "No weather_on stored, defaulting to enabled");
+            *enabled = true;
+        } else {
+            ESP_LOGE(TAG, "Failed to load weather_on: %s", esp_err_to_name(ret));
+        }
+        return ret;
+    }
+
+    *enabled = (val != 0);
+    ESP_LOGI(TAG, "Weather enabled loaded: %s", *enabled ? "on" : "off");
+    return ESP_OK;
+}
+
+esp_err_t nvs_config_save_temp_unit(temp_unit_t unit) {
+    if (!nvs_initialized) {
+        ESP_LOGE(TAG, "NVS not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = nvs_set_u8(nvs_handle_config, KEY_TEMP_UNIT, (uint8_t)unit);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save temp unit: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = nvs_commit(nvs_handle_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit temp unit: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Temp unit saved: %s", unit == TEMP_UNIT_FAHRENHEIT ? "F" : "C");
+    return ESP_OK;
+}
+
+esp_err_t nvs_config_load_temp_unit(temp_unit_t *unit) {
+    if (!nvs_initialized) {
+        ESP_LOGE(TAG, "NVS not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!unit) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t val;
+    esp_err_t ret = nvs_get_u8(nvs_handle_config, KEY_TEMP_UNIT, &val);
+    if (ret != ESP_OK) {
+        if (ret == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGD(TAG, "No temp unit stored, defaulting to Fahrenheit");
+            *unit = TEMP_UNIT_FAHRENHEIT;
+        } else {
+            ESP_LOGE(TAG, "Failed to load temp unit: %s", esp_err_to_name(ret));
+        }
+        return ret;
+    }
+
+    *unit = (temp_unit_t)val;
+    ESP_LOGI(TAG, "Temp unit loaded: %s", *unit == TEMP_UNIT_FAHRENHEIT ? "F" : "C");
     return ESP_OK;
 }

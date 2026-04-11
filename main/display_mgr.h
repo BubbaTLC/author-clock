@@ -3,7 +3,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "quote_fetcher.h"
+#include "quote_types.h"
+#include "weather_fetcher.h"
 
 /**
  * @brief Initialize the e-paper display
@@ -33,12 +34,19 @@ void display_mgr_show_error(const char *msg);
 /**
  * @brief Render the main clock face
  *
+ * Reads display preferences (date mode, weather visibility, temp unit) from NVS.
+ * - Top-left: date/time according to date_mode setting.
+ * - Top-right: weather icon + temp + condition when weather is enabled.
+ * - Horizontal rule: drawn only when top bar has any content.
+ * - Quote: vertically centered in the available area (below rule, or full display).
+ *
  * @param time_h    Current hour (0-23)
  * @param time_m    Current minute (0-59)
  * @param date_str  Human-readable date string (e.g. "Tuesday, April 9")
- * @param quote     Quote to display (may be NULL to show "--:--" placeholder)
+ * @param quote     Quote to display (may be NULL to show placeholder)
+ * @param weather   Current weather data (may be NULL if not available/disabled)
  */
 void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
-                        const quote_result_t *quote);
+                        const quote_result_t *quote, const weather_data_t *weather);
 
 #endif // DISPLAY_MGR_H
