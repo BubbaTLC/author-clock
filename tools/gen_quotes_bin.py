@@ -2,6 +2,10 @@
 """
 gen_quotes_bin.py — Generate a compact binary quote database for the ESP32 book-clock.
 
+Reads one or more JSON source files and merges them into a single binary.  By default
+it combines data.json (curated quotes) with tools/candidates.json (agent-reviewed
+candidates) if the latter exists.  Duplicates (same time + title) are silently dropped.
+
 Binary format (quotes.bin):
   Header (7 bytes):
     [0..3]  Magic:   "BQDB"  (4 ASCII bytes)
@@ -28,13 +32,16 @@ Lookup on ESP32:
   seek(offset) → read count records → pick esp_random() % count
 
 Usage:
-  python3 tools/gen_quotes_bin.py [input.json] [output.bin]
+  python3 tools/gen_quotes_bin.py [output.bin] [--data data.json] [--candidates path]
+  python3 tools/gen_quotes_bin.py            # uses all defaults below
 
 Defaults:
-  input:  data.json          (project root)
-  output: main/data/quotes.bin
+  --data:        data.json              (project root)
+  --candidates:  tools/candidates.json  (included automatically if the file exists)
+  output:        main/data/quotes.bin
 """
 
+import argparse
 import json
 import struct
 import sys
@@ -92,12 +99,30 @@ def encode_record(quote: str, title: str, author: str, timestring: str) -> bytes
     return header + q + t + a + ts
 
 
-def generate(input_path: str, output_path: str) -> None:
-    print(f"Reading: {input_path}")
-    with open(input_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+def load_sources(input_paths: list[str]) -> list[dict]:
+    """Load and merge entries from one or more JSON files, deduplicating by (time, quote)."""
+    seen: set[tuple[str, str]] = set()
+    merged: list[dict] = []
+    for path in input_paths:
+        with open(path, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+        added = 0
+        for entry in entries:
+            # Deduplicate on the exact quote text at the same minute
+            key = (entry.get("time", ""), entry.get("quote", "").strip().lower()[:120])
+            if key not in seen:
+                seen.add(key)
+                merged.append(entry)
+                added += 1
+        print(f"  {path}: {len(entries)} entries loaded, {added} new after dedup")
+    return merged
 
-    print(f"  {len(data)} total entries")
+
+def generate(input_paths: list[str], output_path: str) -> None:
+    print("Reading sources:")
+    data = load_sources(input_paths)
+
+    print(f"  {len(data)} total entries after merge")
 
     # Group records by minute index (0..1439)
     by_minute: dict[int, list[tuple[str, str, str, str]]] = defaultdict(list)
@@ -181,20 +206,54 @@ def main() -> None:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
 
-    input_path = (
-        sys.argv[1] if len(sys.argv) > 1 else os.path.join(project_root, "data.json")
-    )
-    output_path = (
-        sys.argv[2]
-        if len(sys.argv) > 2
-        else os.path.join(project_root, "main", "data", "quotes.bin")
-    )
+    default_data = os.path.join(project_root, "data.json")
+    default_candidates = os.path.join(script_dir, "candidates.json")
+    default_output = os.path.join(project_root, "main", "data", "quotes.bin")
 
-    if not os.path.exists(input_path):
-        print(f"ERROR: Input file not found: {input_path}", file=sys.stderr)
+    parser = argparse.ArgumentParser(
+        description="Generate a compact binary quote database for the ESP32 book-clock."
+    )
+    parser.add_argument(
+        "--data",
+        default=default_data,
+        metavar="PATH",
+        help=f"Primary curated quotes JSON (default: {default_data})",
+    )
+    parser.add_argument(
+        "--candidates",
+        default=default_candidates if os.path.exists(default_candidates) else None,
+        metavar="PATH",
+        help="Agent-reviewed candidates JSON to merge in (default: tools/candidates.json if present)",
+    )
+    parser.add_argument(
+        "--no-candidates",
+        action="store_true",
+        help="Skip candidates.json even if it exists",
+    )
+    parser.add_argument(
+        "output",
+        nargs="?",
+        default=default_output,
+        help=f"Output binary path (default: {default_output})",
+    )
+    args = parser.parse_args()
+
+    input_paths = []
+
+    if not os.path.exists(args.data):
+        print(f"ERROR: Data file not found: {args.data}", file=sys.stderr)
         sys.exit(1)
+    input_paths.append(args.data)
 
-    generate(input_path, output_path)
+    if args.candidates and not args.no_candidates:
+        if not os.path.exists(args.candidates):
+            print(
+                f"ERROR: Candidates file not found: {args.candidates}", file=sys.stderr
+            )
+            sys.exit(1)
+        input_paths.append(args.candidates)
+
+    generate(input_paths, args.output)
 
 
 if __name__ == "__main__":
