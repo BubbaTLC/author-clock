@@ -21,7 +21,7 @@
 
 // Task stack sizes
 #define CLOCK_TASK_STACK_SIZE 8192
-#define WEATHER_TASK_STACK_SIZE 4096
+#define WEATHER_TASK_STACK_SIZE 10240 // HTTPS/TLS handshake needs ~8-10KB minimum
 
 // Maximum retry attempts for WiFi connection
 #define MAX_WIFI_RETRY 5
