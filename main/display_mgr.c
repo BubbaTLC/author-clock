@@ -67,7 +67,7 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
         uint16_t line_width = 0;
 
         // Calculate how much text fits
-        while (p[len] && line_width < max_width) {
+        while (p[len]) {
             if (p[len] == ' ')
                 last_space = len;
             if (p[len] == '\n') {
@@ -75,8 +75,18 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
                 break;
             }
 
-            // Estimate character width (use main font for estimation)
-            line_width += 12; // Conservative estimate for QuicksandBook
+            // Create a temporary string to measure actual width
+            char temp_str[len + 2];
+            memcpy(temp_str, p, len + 1);
+            temp_str[len + 1] = '\0';
+
+            // Use actual font width calculation
+            line_width = bmfont_string_width(temp_str, font);
+
+            if (line_width >= max_width) {
+                break; // This character would exceed the line width
+            }
+
             len++;
         }
 
@@ -540,10 +550,28 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
     } else {
         // Show message with current time instead of "Fetching..."
         char no_quote_msg[80];
-        snprintf(no_quote_msg, sizeof(no_quote_msg),
-                 "Hmm looks like this time doesn't have a quote, but it is %02d:%02d", time_h,
-                 time_m);
-        Paint_DrawString_EN(QUOTE_X, QUOTE_Y + 60, no_quote_msg, &Font12, BLACK, WHITE);
+        if (use_24_hour) {
+            snprintf(no_quote_msg, sizeof(no_quote_msg),
+                     "Hmm looks like this time doesn't have a quote, but it is %02d:%02d", time_h,
+                     time_m);
+        } else {
+            // Convert to 12-hour format
+            uint8_t display_hour = time_h;
+            const char *ampm = "AM";
+            if (time_h == 0) {
+                display_hour = 12; // Midnight is 12:xx AM
+            } else if (time_h == 12) {
+                ampm = "PM"; // Noon is 12:xx PM
+            } else if (time_h > 12) {
+                display_hour = time_h - 12;
+                ampm = "PM";
+            }
+            snprintf(no_quote_msg, sizeof(no_quote_msg),
+                     "Hmm looks like this time doesn't have a quote, but it is %d:%02d %s",
+                     display_hour, time_m, ampm);
+        }
+        bmfont_draw_string(QUOTE_X, QUOTE_Y + 60, no_quote_msg, &QuicksandBook_Regular_48_font,
+                           BLACK, WHITE);
     }
 
     flush_display();

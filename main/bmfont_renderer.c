@@ -93,9 +93,9 @@ uint16_t bmfont_draw_char(uint16_t x, uint16_t y, uint16_t ch, const bmfont_t *f
                         draw_pixel(draw_x + col, draw_y + row, bgcolor);
                     }
                 } else {
-                    // Multi-bit: scale to 0-255 and blend
+                    // Multi-bit: scale to 0-255 and blend (inverted for snowb.org format)
                     uint8_t alpha = (pixel_value * 255) / ((1 << bpp) - 1);
-                    if (alpha > 128) { // Try non-inverted: higher values are foreground
+                    if (alpha < 128) { // Inverted: lower values are foreground
                         draw_pixel(draw_x + col, draw_y + row, color);
                     } else if (bgcolor != color) {
                         draw_pixel(draw_x + col, draw_y + row, bgcolor);
