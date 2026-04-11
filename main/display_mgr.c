@@ -26,8 +26,7 @@ static const char *TAG = "DISPLAY_MGR";
 #define QUOTE_X 20          // Reduce left margin to give more space
 #define QUOTE_Y 80          // Start higher to leave room for larger text
 #define QUOTE_MAX_WIDTH 760 // Use more of the screen width
-#define QUOTE_MAX_Y 320     // Leave more room for attribution
-#define ATTRIB_Y 340        // Move attribution up to account for larger quotes
+#define QUOTE_MAX_Y 360     // Max Y for quote text (leaves room for attribution below)
 
 // ─── Image buffer ─────────────────────────────────────────────────────────────
 // 1 bit per pixel → (800 * 480) / 8 = 48000 bytes
@@ -40,7 +39,8 @@ static quote_result_t s_last_quote = {0};
 static bool s_has_last_quote = false;
 
 // ─── Helper: enhanced word-wrap with bmfont support ──────────────────────────
-// Returns the number of lines drawn. Handles timeString portion in bold/larger font.
+// Returns the Y position immediately after the last drawn line (useful for placing
+// elements dynamically below the text block). Handles timeString portion in bold.
 static int text_wrap_bmfont(const char *text, const char *timestring, const bmfont_t *font,
                             const bmfont_t *bold_font, uint16_t x, uint16_t y, uint16_t max_width,
                             uint16_t max_y) {
@@ -149,7 +149,7 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
         cur_y += line_height + 8; // Line spacing for better readability
         lines++;
     }
-    return lines;
+    return cur_y;
 }
 
 // ─── Helper: clean text encoding issues ───────────────────────────────────────
@@ -370,14 +370,14 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
         const char *timestring =
             (quote_to_display->timestring[0]) ? quote_to_display->timestring : NULL;
 
-        text_wrap_bmfont(quoted_text, timestring, &font_body, &font_body_bold, QUOTE_X, QUOTE_Y,
-                         QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
+        int quote_end_y = text_wrap_bmfont(quoted_text, timestring, &font_body, &font_body_bold,
+                                           QUOTE_X, QUOTE_Y, QUOTE_MAX_WIDTH, QUOTE_MAX_Y);
 
-        // Attribution: Title - Author
+        // Attribution: Title - Author, always 30px below the last line of the quote
         char attrib[288];
         snprintf(attrib, sizeof(attrib), "%s - %s", quote_to_display->title,
                  quote_to_display->author);
-        bmfont_draw_string(QUOTE_X, ATTRIB_Y, attrib, &font_attrib, BLACK, WHITE);
+        bmfont_draw_string(QUOTE_X, quote_end_y + 30, attrib, &font_attrib, BLACK, WHITE);
     } else {
         // Show message with current time instead of "Fetching..."
         char no_quote_msg[80];
