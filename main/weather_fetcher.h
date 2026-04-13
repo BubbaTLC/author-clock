@@ -11,6 +11,7 @@ typedef struct {
     float temp_c;       /**< Temperature in Celsius */
     char condition[64]; /**< Short condition description, e.g. "Cloudy" */
     int weather_id;     /**< OWM weather condition code (for icon selection) */
+    char icon[8];       /**< OWM icon code, e.g. "01d", "10n" */
     bool valid;         /**< false until first successful fetch */
 } weather_data_t;
 

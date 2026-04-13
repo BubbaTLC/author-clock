@@ -415,7 +415,7 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
         // Weather in top-right
         if (show_weather) {
             // Draw icon
-            weather_icon_draw(WEATHER_ICON_X, WEATHER_ICON_Y, weather->weather_id);
+            weather_icon_draw(WEATHER_ICON_X, WEATHER_ICON_Y, weather->icon, weather->weather_id);
 
             // Temperature string
             char temp_str[16];

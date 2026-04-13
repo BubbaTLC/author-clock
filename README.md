@@ -152,7 +152,10 @@ Quotes are stored in a binary format for efficient access. To update:
 528 of the 1440 daily minutes currently have no quote. Use the search tool to find candidates:
 
 ```bash
-# Find quotes for up to 50 missing times (good for daily batching)
+# Use only the local disk cache (instant, no network)
+python3 tools/find_missing_quotes.py --cache-only --limit 50
+
+# Live search — fetches from Google Books API (prefer partial-preview books first)
 python3 tools/find_missing_quotes.py --limit 50
 
 # Process all missing times at once
@@ -167,8 +170,13 @@ the file, remove any entries you don't want, then append the keepers to `data.js
 - Generates search strings in both numeric form (`1:03 am`, `0103h`) and word form
   (`three minutes past one`, `one oh three`, `quarter to two`, `half past six`)
 - Queries the **Google Books API** (free, no key required) filtered to fiction
-- Keeps up to **3 candidates per time**, ranked by distinct titles and quote quality
+- Each query runs twice: first with `filter=partial` (books with preview pages —
+  richer snippets with sentence context before the time phrase), then unfiltered as fallback
+- Ranks candidates by preview access, distinct titles, length near 200 chars, and
+  clean sentence endings
+- Keeps up to **3 candidates per time**
 - Caches all API responses in `tools/.search_cache/` — re-runs skip cached queries
+- `--cache-only` mode reads only from cache with no network requests
 - Never modifies `data.json` directly
 
 **Optional — Google Custom Search:**

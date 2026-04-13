@@ -5,9 +5,20 @@ Identifies every minute not covered by data.json, then queries the Google Books
 API (free, no key needed) and optionally Google Custom Search API (requires
 GOOGLE_CSE_KEY + GOOGLE_CSE_CX in .env) to find candidate quotes.
 
+Search strategy (Google Books):
+  Each query uses filtered searches only — "free-ebooks", "full", and "partial" —
+  which return richer snippets with sentence context surrounding the time phrase.
+  No unfiltered searches are performed to ensure all results have surrounding text.
+
+Candidate ranking (higher score wins):
+  - New title not already in data.json:  +2.0
+  - Book has ALL_PAGES preview access:   +1.5
+  - Book has PARTIAL preview access:     +1.0
+  - Quote length near 200 chars:         up to +1.0 (linear penalty away from 200)
+  - Quote ends at clean sentence boundary: +0.5
+
 Output: tools/candidates.json  — same format as data.json, never touches data.json.
         Each entry may also carry:
-          "source":  URL or API name the snippet came from
           "review":  true  if the quote is >500 chars and may need shortening
 
 Usage:
@@ -15,16 +26,17 @@ Usage:
     python3 tools/find_missing_quotes.py [options]
 
 Options:
-    --data PATH         Path to data.json  (default: data.json)
-    --output PATH       Path to candidates.json  (default: tools/candidates.json)
-    --limit N           Process at most N missing times per run  (default: all)
-    --queries-per-time N  Max search queries per missing time  (default: 5)
-    --max-per-time N    Max candidates kept per time  (default: 3)
-    --cache-dir PATH    Directory for cached API responses  (default: tools/.search_cache)
-    --no-books          Skip Google Books API
-    --no-cse            Skip Google Custom Search API (even if keys are present)
-    --delay SECS        Seconds to sleep between HTTP requests  (default: 1.0)
-    --verbose           Print progress details
+    --data PATH           Path to data.json             (default: data.json)
+    --output PATH         Path to candidates.json        (default: tools/candidates.json)
+    --limit N             Process at most N missing times per run  (default: all)
+    --queries-per-time N  Max search queries per missing time      (default: 5)
+    --max-per-time N      Max candidates kept per time             (default: 3)
+    --cache-dir PATH      Directory for cached API responses       (default: tools/.search_cache)
+    --no-books            Skip Google Books API
+    --no-cse              Skip Google Custom Search API (even if keys are present)
+    --delay SECS          Seconds to sleep between HTTP requests   (default: 1.0)
+    --cache-only          Only use cached API responses; skip any URL not yet cached
+    --verbose / -v        Print per-query detail
 """
 
 from __future__ import annotations
@@ -58,8 +70,14 @@ def _load_env(env_path: Path) -> dict[str, str]:
     return env
 
 
-def _get(url: str, cache_dir: Path, verbose: bool) -> dict[str, Any] | None:
-    """Fetch *url* as JSON, using *cache_dir* as a disk cache."""
+def _get(
+    url: str, cache_dir: Path, verbose: bool, cache_only: bool = False
+) -> dict[str, Any] | None:
+    """Fetch *url* as JSON, using *cache_dir* as a disk cache.
+
+    If *cache_only* is True, returns None on a cache miss instead of making a
+    network request.
+    """
     cache_key = re.sub(r"[^a-zA-Z0-9_\-]", "_", url)[:200]
     cache_file = cache_dir / f"{cache_key}.json"
 
@@ -67,6 +85,11 @@ def _get(url: str, cache_dir: Path, verbose: bool) -> dict[str, Any] | None:
         if verbose:
             print(f"    [cache] {url[:80]}")
         return json.loads(cache_file.read_text())
+
+    if cache_only:
+        if verbose:
+            print(f"    [skip]  {url[:80]}")
+        return None
 
     if verbose:
         print(f"    [fetch] {url[:80]}")
@@ -237,10 +260,24 @@ def _extract_quote(snippet: str, time_phrase: str) -> str | None:
 # ── Scoring ───────────────────────────────────────────────────────────────────
 
 
-def _score(quote: str, title: str, existing_titles: set[str]) -> float:
+_VIEWABILITY_BONUS = {
+    "ALL_PAGES": 1.5,
+    "PARTIAL": 1.0,
+    "NO_PAGES": 0.0,
+    "UNKNOWN": 0.0,
+}
+
+
+def _score(
+    quote: str,
+    title: str,
+    existing_titles: set[str],
+    viewability: str = "UNKNOWN",
+) -> float:
     """
     Score a candidate (higher is better).
-    Prefer: distinct titles, length near 200 chars, clean sentence endings.
+    Prefer: distinct titles, length near 200 chars, clean sentence endings,
+    and books with preview access (richer snippets with context before the time).
     """
     score = 0.0
     if title.lower() not in existing_titles:
@@ -249,6 +286,7 @@ def _score(quote: str, title: str, existing_titles: set[str]) -> float:
     score -= length_penalty
     if quote.rstrip().endswith((".", "?", "!", "…", '"')):
         score += 0.5
+    score += _VIEWABILITY_BONUS.get(viewability, 0.0)
     return score
 
 
@@ -257,28 +295,30 @@ def _score(quote: str, title: str, existing_titles: set[str]) -> float:
 _BOOKS_BASE = "https://www.googleapis.com/books/v1/volumes"
 
 
-def _search_books(
+def _search_books_with_filter(
     query: str,
     cache_dir: Path,
     verbose: bool,
     api_key: str | None = None,
+    cache_only: bool = False,
+    filter_type: str = "partial",
 ) -> list[dict[str, Any]]:
     """
-    Query Google Books for *query* and return a list of
-    {title, author, snippet, categories} dicts.
-    Adds `subject:fiction` to bias results toward literary works.
+    Query Google Books with specific filter types.
+    filter_type can be: "partial", "full", or "free-ebooks"
     """
     params: dict[str, str] = {
         "q": f'"{query}" subject:fiction',
         "langRestrict": "en",
         "maxResults": "10",
         "printType": "books",
+        "filter": filter_type,
     }
     if api_key:
         params["key"] = api_key
 
     url = f"{_BOOKS_BASE}?{urllib.parse.urlencode(params)}"
-    data = _get(url, cache_dir, verbose)
+    data = _get(url, cache_dir, verbose, cache_only=cache_only)
     if not data or "items" not in data:
         return []
 
@@ -300,6 +340,9 @@ def _search_books(
                     "author": author,
                     "snippet": snippet,
                     "categories": categories,
+                    "viewability": item.get("accessInfo", {}).get(
+                        "viewability", "UNKNOWN"
+                    ),
                 }
             )
     return results
@@ -316,6 +359,7 @@ def _search_cse(
     cx: str,
     cache_dir: Path,
     verbose: bool,
+    cache_only: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Query Google Custom Search for *query* and return snippets.
@@ -328,7 +372,7 @@ def _search_cse(
         "num": "10",
     }
     url = f"{_CSE_BASE}?{urllib.parse.urlencode(params)}"
-    data = _get(url, cache_dir, verbose)
+    data = _get(url, cache_dir, verbose, cache_only=cache_only)
     if not data or "items" not in data:
         return []
 
@@ -370,6 +414,7 @@ def process_time(
     books_key: str | None,
     delay: float,
     existing_titles: set[str],
+    cache_only: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Search all sources for *time_str* and return up to *max_per_time* candidates.
@@ -386,6 +431,7 @@ def process_time(
         snippet: str,
         query: str,
         categories: list[str] | None = None,
+        viewability: str = "UNKNOWN",
     ) -> None:
         quote = _extract_quote(snippet, query)
         if not quote:
@@ -409,6 +455,7 @@ def process_time(
             "quote": quote,
             "title": title,
             "author": author,
+            "_viewability": viewability,
         }
         if len(quote) > _REVIEW_LEN:
             entry["review"] = True
@@ -419,27 +466,78 @@ def process_time(
             break
 
         if use_books:
-            for r in _search_books(query, cache_dir, verbose, books_key):
+            # First pass: free ebooks (best text access)
+            for r in _search_books_with_filter(
+                query,
+                cache_dir,
+                verbose,
+                books_key,
+                cache_only=cache_only,
+                filter_type="free-ebooks",
+            ):
                 add_result(
                     r["title"],
                     r["author"],
                     r["snippet"],
                     query,
                     r.get("categories", []),
+                    r.get("viewability", "UNKNOWN"),
                 )
-            time.sleep(delay)
+            # Second pass: full text books
+            if len(candidates) < max_per_time * 3:
+                for r in _search_books_with_filter(
+                    query,
+                    cache_dir,
+                    verbose,
+                    books_key,
+                    cache_only=cache_only,
+                    filter_type="full",
+                ):
+                    add_result(
+                        r["title"],
+                        r["author"],
+                        r["snippet"],
+                        query,
+                        r.get("categories", []),
+                        r.get("viewability", "UNKNOWN"),
+                    )
+            # Third pass: partial text books (previews)
+            if len(candidates) < max_per_time * 3:
+                for r in _search_books_with_filter(
+                    query,
+                    cache_dir,
+                    verbose,
+                    books_key,
+                    cache_only=cache_only,
+                    filter_type="partial",
+                ):
+                    add_result(
+                        r["title"],
+                        r["author"],
+                        r["snippet"],
+                        query,
+                        r.get("categories", []),
+                        r.get("viewability", "UNKNOWN"),
+                    )
+            if not cache_only:
+                time.sleep(delay)
 
         if cse_key and cse_cx:
-            for r in _search_cse(query, cse_key, cse_cx, cache_dir, verbose):
+            for r in _search_cse(
+                query, cse_key, cse_cx, cache_dir, verbose, cache_only=cache_only
+            ):
                 add_result(r["title"], r["author"], r["snippet"], query)
-            time.sleep(delay)
+            if not cache_only:
+                time.sleep(delay)
 
     if not candidates:
         return []
 
     # Rank and keep top N
     candidates.sort(
-        key=lambda c: _score(c["quote"], c["title"], existing_titles),
+        key=lambda c: _score(
+            c["quote"], c["title"], existing_titles, c.get("_viewability", "UNKNOWN")
+        ),
         reverse=True,
     )
     # Prefer distinct titles
@@ -459,6 +557,10 @@ def process_time(
                 break
             if c not in top:
                 top.append(c)
+
+    # Strip internal scoring field before returning
+    for c in top:
+        c.pop("_viewability", None)
 
     return top
 
@@ -483,6 +585,11 @@ def main() -> None:
     parser.add_argument("--no-books", action="store_true")
     parser.add_argument("--no-cse", action="store_true")
     parser.add_argument("--delay", type=float, default=1.0)
+    parser.add_argument(
+        "--cache-only",
+        action="store_true",
+        help="Only use cached API responses; skip any URL not already cached",
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -564,6 +671,7 @@ def main() -> None:
             books_key=books_key,
             delay=args.delay,
             existing_titles=existing_titles,
+            cache_only=args.cache_only,
         )
 
         if results:

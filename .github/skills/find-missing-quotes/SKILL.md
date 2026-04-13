@@ -74,6 +74,19 @@ Query: `"<phrase>" subject:fiction` — biases results toward novels and literar
 
 Returns `searchInfo.textSnippet` (~160–500 chars) centered on the matched phrase.
 
+**Two-pass fetch per query:**
+1. First fires with `filter=free-ebooks` — free Google eBooks with best text access.
+2. If still short of candidates, fires with `filter=full` (complete text viewable).
+3. Finally, fires with `filter=partial` (books with preview pages) which return 
+   richer snippets with full sentence context *before* the time phrase,
+   rather than starting right at it (`... <b>time</b> ...`).
+
+All searches use filters to ensure surrounding text context. No unfiltered searches 
+are performed.
+
+Books with preview access (`PARTIAL` / `ALL_PAGES` viewability) score higher in
+ranking — see Candidate Ranking below.
+
 ### 3. Google Custom Search (optional, requires API keys)
 
 Set in `.env`:
@@ -98,11 +111,18 @@ For each API snippet:
 
 ### 5. Candidate Ranking
 
-Per time slot, keeps up to **3 candidates**:
-- Prefer distinct book titles (no 3 quotes from the same book)
-- Prefer length near 200 chars (matching the data.json median)
-- Prefer quotes that end cleanly at a sentence boundary
-- Quotes >500 chars get a `"review": true` flag
+Per time slot, keeps up to **3 candidates** scored as follows (higher wins):
+
+| Signal | Score |
+|--------|-------|
+| Title not already in `data.json` | +2.0 |
+| Book has `ALL_PAGES` preview access | +1.5 |
+| Book has `PARTIAL` preview access | +1.0 |
+| Quote length near 200 chars | up to +1.0 (linear penalty away from 200) |
+| Quote ends at clean sentence boundary | +0.5 |
+
+Preview access correlates directly with richer snippets: Google Books returns
+sentence context *before* the time phrase only when it can show pages.
 
 ---
 
@@ -176,6 +196,7 @@ python3 tools/find_missing_quotes.py [options]
   --no-books            Skip Google Books API
   --no-cse              Skip Google Custom Search API
   --delay SECS          Sleep between HTTP requests    (default: 1.0)
+  --cache-only          Use only cached responses; skip any URL not yet cached
   --verbose / -v        Print per-query detail
 ```
 
@@ -187,7 +208,7 @@ python3 tools/find_missing_quotes.py [options]
 |---------|-------|-----|
 | `✗ none found` for most times | No fiction-tagged books matched | Try `--no-books` if Books API is rate-limited; check cache |
 | `HTTP Error 503` | Occasional Google API hiccup | Script handles gracefully; cached responses fill in |
-| All quotes have time at start | Context-prefix query (`it was X`) not returning results | Try broader search: increase `--queries-per-time 8` |
+| All quotes have time at start | Google snippet window opened right at the time; `NO_PAGES` viewability | These are ranked lower automatically; live runs prefer `filter=partial` books first |
 | Non-fiction slipping through | `_is_literary()` filter miss | Edit the `_SKIP_AUTHOR_TOKENS` set in `find_missing_quotes.py` |
 | `candidates.json` grows stale | Re-ran after adding candidates to `data.json` | Delete `candidates.json`; script rebuilds from scratch |
 | Rate limit exhausted | Google CSE 100/day free limit | Use `--limit 50` and run again tomorrow; Books API is unlimited |

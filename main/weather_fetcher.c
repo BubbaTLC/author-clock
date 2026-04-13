@@ -167,6 +167,11 @@ esp_err_t weather_fetch(const char *city, weather_data_t *out) {
         out->weather_id = 800; // default to clear
     }
 
+    // Parse weather[0].icon (e.g. "01d", "10n")
+    if (weather_pos) {
+        json_extract_string(weather_pos, "icon", out->icon, sizeof(out->icon));
+    }
+
     // Parse weather[0].description
     if (weather_pos) {
         json_extract_string(weather_pos, "description", out->condition, sizeof(out->condition));
@@ -180,8 +185,8 @@ esp_err_t weather_fetch(const char *city, weather_data_t *out) {
     }
 
     out->valid = true;
-    ESP_LOGI(TAG, "Weather fetched: %.1f°C, id=%d, '%s'", out->temp_c, out->weather_id,
-             out->condition);
+    ESP_LOGI(TAG, "Weather fetched: %.1f°C, id=%d, icon=%s, '%s'", out->temp_c, out->weather_id,
+             out->icon[0] ? out->icon : "(none)", out->condition);
 
     free(s);
     return ESP_OK;
