@@ -12,6 +12,8 @@ packed C byte arrays for Paint_SetPixel rendering on the 7.5" V2 e-paper display
 Usage (from repo root):
     uv run tools/gen_weather_icons.py
     uv run tools/gen_weather_icons.py --size 48
+    uv run tools/gen_weather_icons.py --local-dir tools/icons
+    uv run tools/gen_weather_icons.py --local-dir tools/icons --size 48
 """
 
 from __future__ import annotations
@@ -55,6 +57,14 @@ def download_icon(code: str) -> bytes:
     resp.raise_for_status()
     print(f"[{len(resp.content)} bytes]")
     return resp.content
+
+
+def load_local_icon(code: str, local_dir: Path) -> bytes:
+    path = local_dir / f"{code}.png"
+    if not path.exists():
+        raise FileNotFoundError(f"Icon not found: {path}")
+    print(f"  Loading {path}")
+    return path.read_bytes()
 
 
 def png_to_1bit(png_data: bytes, size: int) -> list[int]:
@@ -161,6 +171,13 @@ def main() -> None:
         default=48,
         help="Icon size in pixels, must be multiple of 8 (default: 48)",
     )
+    parser.add_argument(
+        "--local-dir",
+        type=Path,
+        default=None,
+        help="Load icons from a local directory (e.g. tools/icons) instead of downloading from OWM. "
+        "Files must be named <code>.png, e.g. 01d.png.",
+    )
     args = parser.parse_args()
 
     if args.size % 8 != 0:
@@ -172,17 +189,35 @@ def main() -> None:
     repo_root = Path(__file__).parent.parent
     out_path = repo_root / "main" / "weather_icons_bmp.h"
 
-    print(f"Generating {args.size}×{args.size} weather icon bitmaps → {out_path}")
-    print(f"Fetching {len(ICON_CODES)} icons from OpenWeatherMap...\n")
+    if args.local_dir:
+        local_dir = (
+            args.local_dir
+            if args.local_dir.is_absolute()
+            else repo_root / args.local_dir
+        )
+        print(f"Generating {args.size}×{args.size} weather icon bitmaps → {out_path}")
+        print(f"Loading {len(ICON_CODES)} icons from {local_dir}...\n")
 
-    bitmaps: dict[str, list[int]] = {}
-    for code in ICON_CODES:
-        try:
-            png_data = download_icon(code)
-            bitmaps[code] = png_to_1bit(png_data, args.size)
-        except Exception as e:
-            print(f"  ERROR for {code}: {e}", file=sys.stderr)
-            sys.exit(1)
+        bitmaps: dict[str, list[int]] = {}
+        for code in ICON_CODES:
+            try:
+                png_data = load_local_icon(code, local_dir)
+                bitmaps[code] = png_to_1bit(png_data, args.size)
+            except Exception as e:
+                print(f"  ERROR for {code}: {e}", file=sys.stderr)
+                sys.exit(1)
+    else:
+        print(f"Generating {args.size}×{args.size} weather icon bitmaps → {out_path}")
+        print(f"Fetching {len(ICON_CODES)} icons from OpenWeatherMap...\n")
+
+        bitmaps = {}
+        for code in ICON_CODES:
+            try:
+                png_data = download_icon(code)
+                bitmaps[code] = png_to_1bit(png_data, args.size)
+            except Exception as e:
+                print(f"  ERROR for {code}: {e}", file=sys.stderr)
+                sys.exit(1)
 
     generate_header(bitmaps, args.size, out_path)
 
