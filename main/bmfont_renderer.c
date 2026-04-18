@@ -64,42 +64,30 @@ uint16_t bmfont_draw_char(uint16_t x, uint16_t y, uint16_t ch, const bmfont_t *f
     // Draw the glyph bitmap
     const uint8_t *data = glyph->data;
     if (data && glyph->w > 0 && glyph->h > 0) {
-        uint8_t bpp = font->bpp ? font->bpp : 8;      // Assume 8-bit from snowb.org
-        uint8_t pixels_per_byte = (bpp == 1) ? 8 : 1; // For 8-bit, 1 pixel per byte
-        uint8_t pixel_mask = (bpp == 1) ? 1 : 0xFF;
+        uint8_t bpp = font->bpp ? font->bpp : 8;
 
         for (uint8_t row = 0; row < glyph->h; row++) {
             for (uint8_t col = 0; col < glyph->w; col++) {
                 uint16_t pixel_idx = row * glyph->w + col;
                 uint8_t pixel_value;
 
-                if (bpp == 1) {
-                    // Original 1-bit handling
-                    uint16_t byte_idx = pixel_idx / pixels_per_byte;
-                    uint8_t bit_offset = (pixel_idx % pixels_per_byte) * bpp;
-                    pixel_value = (data[byte_idx] >> (8 - bit_offset - bpp)) & pixel_mask;
+                if (bpp == 4) {
+                    // 4-bit: two pixels per byte, high nibble first
+                    uint16_t byte_idx = pixel_idx / 2;
+                    pixel_value = (pixel_idx & 1)
+                                      ? (data[byte_idx] & 0x0F) // odd pixel: low nibble
+                                      : (data[byte_idx] >> 4);  // even pixel: high nibble
                 } else {
-                    // 8-bit grayscale - one byte per pixel
+                    // 8-bit grayscale: one byte per pixel
                     pixel_value = data[pixel_idx];
                 }
 
-                if (bpp == 1) {
-                    // 1-bit: but data appears to be 8-bit grayscale from snowb.org
-                    // Invert the logic: treat values < 128 as foreground (text), >= 128 as
-                    // background
-                    if (pixel_value < 128) {
-                        draw_pixel(draw_x + col, draw_y + row, color);
-                    } else if (bgcolor != color) { // Only draw background if different
-                        draw_pixel(draw_x + col, draw_y + row, bgcolor);
-                    }
-                } else {
-                    // Multi-bit: scale to 0-255 and blend (inverted for snowb.org format)
-                    uint8_t alpha = (pixel_value * 255) / ((1 << bpp) - 1);
-                    if (alpha < 128) { // Inverted: lower values are foreground
-                        draw_pixel(draw_x + col, draw_y + row, color);
-                    } else if (bgcolor != color) {
-                        draw_pixel(draw_x + col, draw_y + row, bgcolor);
-                    }
+                // Scale to 0-255 and threshold (inverted: 0=ink, max=background)
+                uint8_t alpha = (pixel_value * 255) / ((1 << bpp) - 1);
+                if (alpha < 128) {
+                    draw_pixel(draw_x + col, draw_y + row, color);
+                } else if (bgcolor != color) {
+                    draw_pixel(draw_x + col, draw_y + row, bgcolor);
                 }
             }
         }

@@ -1,7 +1,7 @@
 ---
 name: gen-fonts
-description: "Generate C font arrays for the book-clock ESP32 e-paper display. Use when: adding a new font, regenerating fonts after changing size or weight, troubleshooting blank text on display, changing the active font role (body, bold, attribution, UI), adding a new typeface variant, or adjusting emboldening. Covers gen_font.py usage, gen_all_fonts.sh, font_select.h role assignments, and bmfont.h data types."
-argument-hint: "Describe the font change: e.g. 'regenerate all fonts', 'add size 60', 'swap body font to bold 48'"
+description: "Generate C font arrays for the book-clock ESP32 e-paper display. Use when: adding a new font, regenerating fonts after changing size or weight, troubleshooting blank text on display, changing the active font role (body, bold, attribution, UI), adding a new typeface variant, adjusting emboldening, or previewing fonts as PNG without flashing. Covers gen_font.py usage, gen_all_fonts.sh, font_select.h role assignments, bmfont.h data types, and the --preview flag."
+argument-hint: "Describe the font change: e.g. 'regenerate all fonts', 'add size 60', 'swap body font to bold 48', 'preview the current font'"
 ---
 
 # Font Generation for book-clock
@@ -16,10 +16,11 @@ No display code needs to change when swapping fonts — only `font_select.h` and
 
 | File | Purpose |
 |------|---------|
-| `tools/gen_font.py` | Renders glyphs with FreeType, writes `.c`/`.h` pairs |
+| `tools/gen_font.py` | Renders glyphs with FreeType, writes `.c`/`.h` pairs (and optional PNG preview) |
 | `tools/gen_all_fonts.sh` | Runs gen_font.py for all 6 combinations (2 variants × 3 sizes) |
 | `tools/fonts/` | Source `.otf`/`.ttf` files |
 | `main/fonts/font_{variant}_{size}.c/.h` | Generated output (committed) |
+| `main/fonts/font_{variant}_{size}_preview.png` | PNG specimen sheet (generated on demand, not committed) |
 | `main/fonts/font_select.h` | Maps role macros (`font_body`, `font_body_bold`, etc.) to generated fonts |
 | `main/fonts/bmfont.h` | C structs: `font_t`, `glyph_t`, `kern_t` |
 
@@ -78,15 +79,37 @@ uv run tools/gen_font.py --font tools/fonts/Quicksand_Bold.otf --size 36 --varia
 
 Edit `main/fonts/font_select.h` — change `#define font_body` to a different already-generated symbol, then rebuild. No source files need touching.
 
+### Preview a Font Without Flashing
+
+Add `--preview` to any gen_font.py call. It renders the exact pixel data that will be baked
+into the C array onto an **800×480 light-gray canvas** (matching the e-paper display) and
+writes `{sym}_preview.png` to the output directory.
+
+```bash
+# Default specimen: pangram + uppercase/lowercase/digit rows
+uv run tools/gen_font.py --font tools/fonts/Roboto-Condensed.ttf --size 36 --variant book --preview
+
+# Custom text — use \n to separate lines
+uv run tools/gen_font.py --font tools/fonts/Roboto-Condensed.ttf --size 36 --variant book \
+  --preview --preview-text "It was the best of times.\nA Tale of Two Cities — Dickens"
+```
+
+Output: `main/fonts/font_book_36_preview.png`. What you see is exactly what will render on
+the device. `gen_all_fonts.sh` does **not** generate previews — add `--preview` manually
+when iterating.
+
 ## Parameter Reference
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `--font` | Yes | Path to `.otf`/`.ttf` source file |
-| `--size` | Yes | Pixel height (72 DPI basis). Typical: 24, 36, 48 |
+| `--size` | Yes | Rendered pixel height. Always means pixels regardless of `--dpi`. Typical: 24, 36, 48 |
 | `--variant` | Yes | Name embedded in output filename (e.g. `book`, `bold`) |
 | `--embolden` | No | Synthetic outline thickening in 1/64-px units. Default: 0. Use 32 for thin faces (+1px stroke). Range: 16–48 |
+| `--dpi` | No | Screen DPI for FreeType hinting (default: 72). Use `--dpi 125` to match the 7.5-inch e-paper display. Affects hinting quality only — rendered pixel size is unchanged. |
 | `--output` | No | Output directory. Default: `main/fonts` |
+| `--preview` | No | Write a PNG specimen sheet alongside the `.c/.h` files |
+| `--preview-text` | No | Custom preview text; use `\n` to separate lines. Default: built-in pangram + alphabet specimen |
 
 ## Data Format
 
@@ -110,9 +133,10 @@ Edit `main/fonts/font_select.h` — change `#define font_body` to a different al
 | Font file not found | `.otf` missing from `tools/fonts/` | Ensure the font file exists in `tools/fonts/` |
 | Text too thin on e-paper | Book face with `--embolden 0` | Always pass `--embolden 32` for Book variant |
 | CMake build error after adding font | New `.c` not in build system | `main/CMakeLists.txt` uses glob — just rebuild, CMake will pick up the new file |
+| Preview PNG is blank / all-gray | No glyphs rendered | Check that `--font` path is correct and `--size` is reasonable (≥ 16) |
 
 ## Prerequisites
 
-- `uv` package manager installed (provides `freetype-py` automatically via inline script metadata)
+- `uv` package manager installed (provides `freetype-py` and `pillow` automatically via inline script metadata)
 - Source `.otf`/`.ttf` files in `tools/fonts/`
 - Run all commands from the **repo root** (`/Users/bubbachabot/3d_printing_projects/book-clock`)

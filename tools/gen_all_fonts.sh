@@ -19,10 +19,10 @@ BOLD="tools/fonts/Roboto-BoldCondensed.ttf"
 
 for SIZE in 24 36 48; do
     echo "── book ${SIZE}px ──────────────────────────────────────"
-    uv run tools/gen_font.py --font "$BOOK" --size "$SIZE" --variant book
+    uv run tools/gen_font.py --font "$BOOK" --size "$SIZE" --variant book --bpp 4 --dpi 125
 
     echo "── bold ${SIZE}px ──────────────────────────────────────"
-    uv run tools/gen_font.py --font "$BOLD" --size "$SIZE" --variant bold
+    uv run tools/gen_font.py --font "$BOLD" --size "$SIZE" --variant bold --bpp 4 --dpi 125
 done
 
 echo ""

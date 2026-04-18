@@ -139,6 +139,36 @@ This shows real-time output with wall-clock timestamps for easier debugging.
 └── partitions.csv     # Flash partition layout
 ```
 
+### Fonts
+
+Font bitmaps are pre-baked into C arrays at build time using `tools/gen_font.py` (via FreeType).
+The generated `.c/.h` pairs live in `main/fonts/`. To swap fonts project-wide, edit
+`main/fonts/font_select.h` and rebuild — no display code needs changing.
+
+**Regenerate all six default fonts** (2 weights × 3 sizes):
+```bash
+tools/gen_all_fonts.sh
+```
+
+**Regenerate a single font:**
+```bash
+uv run tools/gen_font.py --font tools/fonts/Roboto-Condensed.ttf --size 36 --variant book
+```
+
+**Preview a font without flashing** — renders an 800×480 PNG specimen using the exact pixel
+data that will be baked into the C array:
+```bash
+uv run tools/gen_font.py --font tools/fonts/Roboto-Condensed.ttf --size 36 --variant book \
+  --preview
+
+# Custom text (use \n for line breaks)
+uv run tools/gen_font.py ... --preview --preview-text "It was the best of times.\nCharles Dickens"
+```
+
+Output: `main/fonts/font_book_36_preview.png`. What you see is exactly what renders on the device.
+
+See [tools/gen_font.py](tools/gen_font.py) for the full parameter reference.
+
 ### Adding Quotes
 
 Quotes are stored in a binary format for efficient access. To update:
