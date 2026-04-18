@@ -10,6 +10,8 @@
 # Current typeface: Roboto Condensed (regular + bold).
 # To switch fonts, update the BOOK/BOLD paths below and re-run.
 # Use --embolden N (e.g. 32) for thin faces like Quicksand Book that look jaggy on e-paper.
+# Use --hinting [none|auto|native]: 'none' (default) disables grid-fitting for crisper
+#   letterforms on the 125 DPI e-paper panel. Switch to 'auto' or 'native' to experiment.
 
 set -e
 cd "$(dirname "$0")/.."
@@ -19,10 +21,10 @@ BOLD="tools/fonts/Roboto-BoldCondensed.ttf"
 
 for SIZE in 24 36 48; do
     echo "── book ${SIZE}px ──────────────────────────────────────"
-    uv run tools/gen_font.py --font "$BOOK" --size "$SIZE" --variant book --bpp 4 --dpi 125
+    uv run tools/gen_font.py --font "$BOOK" --size "$SIZE" --variant book --bpp 4 --dpi 125 --hinting none
 
     echo "── bold ${SIZE}px ──────────────────────────────────────"
-    uv run tools/gen_font.py --font "$BOLD" --size "$SIZE" --variant bold --bpp 4 --dpi 125
+    uv run tools/gen_font.py --font "$BOLD" --size "$SIZE" --variant bold --bpp 4 --dpi 125 --hinting none
 done
 
 echo ""

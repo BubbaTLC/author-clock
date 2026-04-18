@@ -12,6 +12,9 @@ Usage (from repo root):
     uv run tools/gen_font.py --font tools/fonts/Quicksand_Book.otf --size 36 --variant book
     uv run tools/gen_font.py --font tools/fonts/Quicksand_Bold.otf --size 36 --variant bold
 
+    # Disable hinting for crisper output on 125 DPI e-paper (recommended):
+    uv run tools/gen_font.py --font tools/fonts/Roboto-Condensed.ttf --size 36 --variant book --hinting none
+
 Or run all sizes at once:
     tools/gen_all_fonts.sh
 """
@@ -131,6 +134,7 @@ def generate(
     embolden: int = 0,
     bpp: int = 8,
     dpi: int = 72,
+    hinting: str = "none",
     preview: bool = False,
     preview_text: str | None = None,
 ) -> None:
@@ -140,6 +144,14 @@ def generate(
 
     ascender_px = face.size.ascender >> 6
 
+    # Map hinting mode to FreeType load flags
+    if hinting == "none":
+        hint_flag = freetype.FT_LOAD_NO_HINTING
+    elif hinting == "native":
+        hint_flag = freetype.FT_LOAD_NO_AUTOHINT
+    else:  # "auto"
+        hint_flag = 0
+
     # ── Render every glyph in the charset ─────────────────────────────────────
     glyphs: list[dict] = []
     for cp in CHARSET:
@@ -148,7 +160,8 @@ def generate(
             # FT_Outline_Embolden expands the outline by `embolden` units (26.6 fixed-point)
             # on each side. The advance is NOT updated automatically, so we add it manually.
             face.load_char(
-                chr(cp), freetype.FT_LOAD_DEFAULT | freetype.FT_LOAD_NO_BITMAP
+                chr(cp),
+                freetype.FT_LOAD_DEFAULT | freetype.FT_LOAD_NO_BITMAP | hint_flag,
             )
             freetype.raw.FT_Outline_Embolden(
                 ctypes.byref(face.glyph.outline._FT_Outline), embolden
@@ -158,7 +171,8 @@ def generate(
             extra_adv = (embolden + 31) // 32
         else:
             face.load_char(
-                chr(cp), freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_NORMAL
+                chr(cp),
+                freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_NORMAL | hint_flag,
             )
             extra_adv = 0
 
@@ -291,7 +305,8 @@ def generate(
     print(f"  wrote {c_path}")
     print(
         f"  baseline={ascender_px}px  glyphs={len(glyphs)}"
-        f"  kern_pairs={len(kern_flat)}  data_bytes={len(data_flat)}  dpi={dpi}"
+        f"  kern_pairs={len(kern_flat)}  data_bytes={len(data_flat)}"
+        f"  dpi={dpi}  hinting={hinting}"
     )
 
     if preview:
@@ -346,6 +361,19 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--hinting",
+        choices=["auto", "none", "native"],
+        default="none",
+        metavar="MODE",
+        help=(
+            "FreeType hinting mode (default: none). "
+            "'none' disables all grid-fitting — recommended for 125 DPI e-paper where "
+            "hinting distorts letterforms. "
+            "'auto' enables FreeType's auto-hinter (better for low-DPI screens). "
+            "'native' uses the font's own TrueType/CFF hints instead of the auto-hinter."
+        ),
+    )
+    parser.add_argument(
         "--preview",
         action="store_true",
         help="Write a PNG specimen sheet alongside the .c/.h files",
@@ -375,6 +403,7 @@ def main() -> None:
         args.embolden,
         bpp=args.bpp,
         dpi=args.dpi,
+        hinting=args.hinting,
         preview=args.preview,
         preview_text=args.preview_text,
     )
