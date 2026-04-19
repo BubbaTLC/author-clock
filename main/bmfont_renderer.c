@@ -169,5 +169,5 @@ uint16_t bmfont_string_width(const char *str, const bmfont_t *font) {
 uint16_t bmfont_height(const bmfont_t *font) {
     if (!font)
         return 0;
-    return font->baseline;
+    return font->line_height;
 }

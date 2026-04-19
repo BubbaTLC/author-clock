@@ -143,6 +143,7 @@ def generate(
     face.set_char_size(int(size_px * 72 / dpi * 64), 0, dpi, dpi)
 
     ascender_px = face.size.ascender >> 6
+    line_height_px = face.size.height >> 6
 
     # Map hinting mode to FreeType load flags
     if hinting == "none":
@@ -292,6 +293,7 @@ def generate(
     # Font struct
     lines.append(f"const font_t {sym}_font = {{")
     lines.append(f"    {ascender_px},       /* baseline: ascender height in px */")
+    lines.append(f"    {line_height_px},    /* line_height: full line advance in px */")
     lines.append(f"    {len(glyphs)},       /* glyph_count */")
     lines.append(
         f"    {bpp},               /* bpp (inverted: 0=ink, max=background) */"
@@ -304,7 +306,7 @@ def generate(
     c_path.write_text("\n".join(lines))
     print(f"  wrote {c_path}")
     print(
-        f"  baseline={ascender_px}px  glyphs={len(glyphs)}"
+        f"  baseline={ascender_px}px  line_height={line_height_px}px  glyphs={len(glyphs)}"
         f"  kern_pairs={len(kern_flat)}  data_bytes={len(data_flat)}"
         f"  dpi={dpi}  hinting={hinting}"
     )

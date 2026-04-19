@@ -7,7 +7,7 @@
 # Output: main/fonts/font_{book,bold}_{24,36,48}.c/.h
 # To swap the active font sizes, edit main/fonts/font_select.h — no C code changes needed.
 #
-# Current typeface: Roboto Condensed (regular + bold).
+# Current typeface: Quicksand (Book + Bold).
 # To switch fonts, update the BOOK/BOLD paths below and re-run.
 # Use --embolden N (e.g. 32) for thin faces like Quicksand Book that look jaggy on e-paper.
 # Use --hinting [none|auto|native]: 'none' (default) disables grid-fitting for crisper
@@ -16,8 +16,8 @@
 set -e
 cd "$(dirname "$0")/.."
 
-BOOK="tools/fonts/Roboto-Condensed.ttf"
-BOLD="tools/fonts/Roboto-BoldCondensed.ttf"
+BOOK="tools/fonts/RobotoCondensed-Regular.ttf"
+BOLD="tools/fonts/RobotoCondensed-Bold.ttf"
 
 for SIZE in 24 36 48; do
     echo "── book ${SIZE}px ──────────────────────────────────────"

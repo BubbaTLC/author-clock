@@ -25,16 +25,17 @@ static const char *TAG = "DISPLAY_MGR";
 // Time text: one font_ui line (23px) vertically centred in [0, HRULE_Y]
 #define TIME_Y ((HRULE_Y - 23) / 2) // = 23
 
-// Weather block: right-aligned in the top bar
-#define WEATHER_ICON_X (EPD_W - 260)
+// Weather block: right-aligned in the top bar, computed dynamically at render time
 // Centre the 2-line text block (48px) in [0, HRULE_Y]; icon starts at same top edge
 #define WEATHER_ICON_Y ((HRULE_Y - 48) / 2) // = 11
-#define WEATHER_TEXT_X (WEATHER_ICON_X + ICON_SIZE + 6)
-#define WEATHER_MAX_X (EPD_W - 8)
+#define WEATHER_TEXT_GAP 6                  // pixels between icon right edge and text
+#define WEATHER_MAX_X (EPD_W - 8)           // right boundary
+#define WEATHER_MIN_LEFT 300                // keep clear of date/time on the left
 
 // Quote area
 #define QUOTE_X 20
 #define QUOTE_MAX_WIDTH 760
+#define ATTRIB_MAX_WIDTH (EPD_W - QUOTE_X - 8)
 
 // ─── Image buffer ─────────────────────────────────────────────────────────────
 #define IMAGE_SIZE (EPD_W * EPD_H / 8)
@@ -199,7 +200,7 @@ static int text_wrap_bmfont(const char *text, const char *timestring, const bmfo
         if (*p == ' ' || *p == '\n')
             p++;
 
-        cur_y += line_height + 8; // Line spacing for better readability
+        cur_y += line_height;
         lines++;
     }
     return cur_y;
@@ -414,10 +415,7 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
 
         // Weather in top-right
         if (show_weather) {
-            // Draw icon
-            weather_icon_draw(WEATHER_ICON_X, WEATHER_ICON_Y, weather->icon, weather->weather_id);
-
-            // Temperature string
+            // Build text strings first so we can measure them
             char temp_str[16];
             if (temp_unit == TEMP_UNIT_FAHRENHEIT) {
                 int temp_f = (int)((weather->temp_c * 9.0f / 5.0f) + 32.0f + 0.5f);
@@ -433,20 +431,27 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
                          temp_c);
             }
 
-            // Draw temp on first line of weather block
-            bmfont_draw_string(WEATHER_TEXT_X, WEATHER_ICON_Y, temp_str, &font_ui, BLACK, WHITE);
+            // Measure text widths to compute right-aligned block position
+            uint16_t temp_w = bmfont_string_width(temp_str, &font_ui);
+            uint16_t cond_w = bmfont_string_width(weather->condition, &font_ui);
+            uint16_t text_block_w = temp_w > cond_w ? temp_w : cond_w;
+            uint16_t total_w = ICON_SIZE + WEATHER_TEXT_GAP + text_block_w;
+            uint16_t icon_x = (total_w < (WEATHER_MAX_X - WEATHER_MIN_LEFT))
+                                  ? (WEATHER_MAX_X - total_w)
+                                  : WEATHER_MIN_LEFT;
+            uint16_t text_x = icon_x + ICON_SIZE + WEATHER_TEXT_GAP;
 
-            // Draw condition on second line (capped at available width)
+            // Draw icon
+            weather_icon_draw(icon_x, WEATHER_ICON_Y, weather->icon, weather->weather_id);
+
+            // Draw temp on first line of weather block
+            bmfont_draw_string(text_x, WEATHER_ICON_Y, temp_str, &font_ui, BLACK, WHITE);
+
+            // Draw condition on second line
             uint16_t text_line2_y = WEATHER_ICON_Y + bmfont_height(&font_ui) + 2;
             if (text_line2_y < HRULE_Y - 2) {
-                char cond_buf[48];
-                strlcpy(cond_buf, weather->condition, sizeof(cond_buf));
-                // Truncate if too wide
-                while (strlen(cond_buf) > 0 &&
-                       bmfont_string_width(cond_buf, &font_ui) > (WEATHER_MAX_X - WEATHER_TEXT_X)) {
-                    cond_buf[strlen(cond_buf) - 1] = '\0';
-                }
-                bmfont_draw_string(WEATHER_TEXT_X, text_line2_y, cond_buf, &font_ui, BLACK, WHITE);
+                bmfont_draw_string(text_x, text_line2_y, weather->condition, &font_ui, BLACK,
+                                   WHITE);
             }
         }
 
@@ -458,8 +463,19 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
     uint16_t quote_area_top = top_bar_visible ? (HRULE_Y + 10) : 0;
     uint16_t attrib_h = bmfont_height(&font_attrib);
     uint16_t body_h = bmfont_height(&font_body);
-    // Reserve bottom margin for attribution (height + 30px gap + 10px padding)
-    uint16_t attrib_total = attrib_h + 40;
+
+    // Determine early whether attribution fits on one line or needs two
+    bool has_quote = (quote && quote->quote[0]);
+    int attrib_lines = 1;
+    char attrib_full[288];
+    if (has_quote) {
+        snprintf(attrib_full, sizeof(attrib_full), "%s - %s", quote->title, quote->author);
+        if (bmfont_string_width(attrib_full, &font_attrib) > ATTRIB_MAX_WIDTH)
+            attrib_lines = 2;
+    }
+
+    // Reserve bottom margin for attribution (lines × height + 30px gap + 10px padding)
+    uint16_t attrib_total = (uint16_t)(attrib_lines * attrib_h) + 40;
     uint16_t available_h = EPD_H - quote_area_top - attrib_total;
 
     // Build the text for measurement
@@ -468,7 +484,6 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
     char time_str[16];
     const char *display_text = NULL;
     const char *display_ts = NULL;
-    bool has_quote = (quote && quote->quote[0]);
 
     if (has_quote) {
         snprintf(quoted_text, sizeof(quoted_text), "\"%s\"", quote->quote);
@@ -516,12 +531,22 @@ void display_mgr_update(uint8_t time_h, uint8_t time_m, const char *date_str,
 
     // ── Attribution ───────────────────────────────────────────────────────────
     if (has_quote) {
-        char attrib[288];
-        snprintf(attrib, sizeof(attrib), "%s - %s", quote->title, quote->author);
         int attrib_y = quote_end_y + 30;
-        if (attrib_y > (int)(EPD_H - attrib_h - 4))
-            attrib_y = EPD_H - attrib_h - 4;
-        bmfont_draw_string(QUOTE_X, (uint16_t)attrib_y, attrib, &font_attrib, BLACK, WHITE);
+        if (attrib_lines == 2) {
+            // Two-line attribution: "{title} -" / "{author}"
+            if (attrib_y > (int)(EPD_H - 2 * attrib_h - 4))
+                attrib_y = EPD_H - 2 * attrib_h - 4;
+            char title_line[288];
+            snprintf(title_line, sizeof(title_line), "%s -", quote->title);
+            bmfont_draw_string(QUOTE_X, (uint16_t)attrib_y, title_line, &font_attrib, BLACK, WHITE);
+            bmfont_draw_string(QUOTE_X, (uint16_t)(attrib_y + attrib_h), quote->author,
+                               &font_attrib, BLACK, WHITE);
+        } else {
+            if (attrib_y > (int)(EPD_H - attrib_h - 4))
+                attrib_y = EPD_H - attrib_h - 4;
+            bmfont_draw_string(QUOTE_X, (uint16_t)attrib_y, attrib_full, &font_attrib, BLACK,
+                               WHITE);
+        }
     }
 
     flush_display();

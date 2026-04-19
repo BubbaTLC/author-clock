@@ -20,7 +20,8 @@ typedef struct {
 } kern_t;
 
 typedef struct {
-    uint16_t baseline;
+    uint16_t baseline;    // ascender height in px (pre-baked into each glyph's y offset)
+    uint16_t line_height; // full line advance: ascender + |descender| + leading
     uint16_t glyph_count;
     uint16_t bpp;
     const kern_t *kern;
